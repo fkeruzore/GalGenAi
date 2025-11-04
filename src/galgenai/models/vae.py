@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from typing import Tuple
 
-from .layers import DownsampleBlock, UpsampleBlock, ResidualBlock
+from .layers import DownsampleBlock, UpsampleBlock
 
 
 class VAEEncoder(nn.Module):
@@ -23,14 +23,18 @@ class VAEEncoder(nn.Module):
         input_size: Spatial size of input images (assumes square images).
     """
 
-    def __init__(self, in_channels: int = 1, latent_dim: int = 16, input_size: int = 32):
+    def __init__(
+        self, in_channels: int = 1, latent_dim: int = 16, input_size: int = 32
+    ):
         super().__init__()
         self.latent_dim = latent_dim
         self.input_size = input_size
 
         # Calculate the spatial size after 7 downsampling operations
         # Each downsample reduces size by factor of 2
-        self.final_spatial_size = input_size // (2**7)  # 32 -> 0.25, need to handle carefully
+        self.final_spatial_size = input_size // (
+            2**7
+        )  # 32 -> 0.25, need to handle carefully
 
         # Initial channel-wise dense embedding
         self.initial_conv = nn.Conv2d(in_channels, 16, kernel_size=3, padding=1)
@@ -54,7 +58,9 @@ class VAEEncoder(nn.Module):
         # Recalculating for 5 stages to fit 32x32 input
         # Will modify architecture to be adaptive
 
-        self.flatten_size = 512 * (input_size // (2**7)) ** 2 if input_size >= 128 else 512
+        self.flatten_size = (
+            512 * (input_size // (2**7)) ** 2 if input_size >= 128 else 512
+        )
 
         # Dense layers for mean and log variance
         self.fc_mu = nn.Linear(self.flatten_size, latent_dim)
@@ -106,7 +112,9 @@ class VAEDecoder(nn.Module):
         input_size: Spatial size of target output images.
     """
 
-    def __init__(self, latent_dim: int = 16, out_channels: int = 1, input_size: int = 32):
+    def __init__(
+        self, latent_dim: int = 16, out_channels: int = 1, input_size: int = 32
+    ):
         super().__init__()
         self.latent_dim = latent_dim
         self.input_size = input_size
@@ -115,14 +123,18 @@ class VAEDecoder(nn.Module):
         self.num_stages = 5 if input_size < 64 else (6 if input_size < 128 else 7)
         self.initial_spatial_size = input_size // (2**self.num_stages)
 
-        self.flatten_size = 512 * self.initial_spatial_size**2 if self.initial_spatial_size > 0 else 512
+        self.flatten_size = (
+            512 * self.initial_spatial_size**2 if self.initial_spatial_size > 0 else 512
+        )
 
         # Dense layer to expand from latent space
         self.fc = nn.Linear(latent_dim, self.flatten_size)
 
         # Unflatten parameters
         self.unflatten_channels = 512
-        self.unflatten_size = self.initial_spatial_size if self.initial_spatial_size > 0 else 1
+        self.unflatten_size = (
+            self.initial_spatial_size if self.initial_spatial_size > 0 else 1
+        )
 
         # Upsampling stages (mirror of encoder)
         # Depths: 512 -> 512 -> 256 -> 128 -> 64 -> 32 -> 16
@@ -135,10 +147,18 @@ class VAEDecoder(nn.Module):
             # For 5 stages, start directly
             pass
 
-        self.stage5 = UpsampleBlock(512 if self.num_stages < 6 else 256, 256 if self.num_stages < 6 else 128)
-        self.stage4 = UpsampleBlock(256 if self.num_stages < 6 else 128, 128 if self.num_stages < 6 else 64)
-        self.stage3 = UpsampleBlock(128 if self.num_stages < 6 else 64, 64 if self.num_stages < 6 else 32)
-        self.stage2 = UpsampleBlock(64 if self.num_stages < 6 else 32, 32 if self.num_stages < 6 else 16)
+        self.stage5 = UpsampleBlock(
+            512 if self.num_stages < 6 else 256, 256 if self.num_stages < 6 else 128
+        )
+        self.stage4 = UpsampleBlock(
+            256 if self.num_stages < 6 else 128, 128 if self.num_stages < 6 else 64
+        )
+        self.stage3 = UpsampleBlock(
+            128 if self.num_stages < 6 else 64, 64 if self.num_stages < 6 else 32
+        )
+        self.stage2 = UpsampleBlock(
+            64 if self.num_stages < 6 else 32, 32 if self.num_stages < 6 else 16
+        )
         self.stage1 = UpsampleBlock(32 if self.num_stages < 6 else 16, 16)
 
         # Final convolution to output channels
@@ -159,7 +179,9 @@ class VAEDecoder(nn.Module):
         """
         # Expand from latent space
         x = self.fc(z)
-        x = x.view(-1, self.unflatten_channels, self.unflatten_size, self.unflatten_size)
+        x = x.view(
+            -1, self.unflatten_channels, self.unflatten_size, self.unflatten_size
+        )
 
         # Upsampling stages
         if self.num_stages >= 7:
@@ -191,7 +213,9 @@ class VAE(nn.Module):
         input_size: Spatial size of input images (assumes square).
     """
 
-    def __init__(self, in_channels: int = 1, latent_dim: int = 16, input_size: int = 32):
+    def __init__(
+        self, in_channels: int = 1, latent_dim: int = 16, input_size: int = 32
+    ):
         super().__init__()
         self.encoder = VAEEncoder(in_channels, latent_dim, input_size)
         self.decoder = VAEDecoder(latent_dim, in_channels, input_size)
@@ -211,7 +235,9 @@ class VAE(nn.Module):
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(
+        self, x: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass through the VAE.
 

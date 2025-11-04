@@ -32,7 +32,9 @@ def vae_loss(
     if reconstruction_loss_fn == "mse":
         recon_loss = nn.functional.mse_loss(reconstruction, x, reduction="sum")
     elif reconstruction_loss_fn == "bce":
-        recon_loss = nn.functional.binary_cross_entropy(reconstruction, x, reduction="sum")
+        recon_loss = nn.functional.binary_cross_entropy(
+            reconstruction, x, reduction="sum"
+        )
     else:
         raise ValueError(f"Unknown reconstruction loss: {reconstruction_loss_fn}")
 

@@ -23,7 +23,7 @@ def verify_architecture():
     print(f"   Input shape: {x.shape}")
     print(f"   Output shape: {recon.shape}")
     print(f"   Latent dimension: {mu.shape[1]}")
-    print(f"   ✓ Latent dim is 16 as specified")
+    print("   ✓ Latent dim is 16 as specified")
 
     # Count parameters
     encoder_params = sum(p.numel() for p in model_32.encoder.parameters())
@@ -54,7 +54,9 @@ def verify_architecture():
     # Verify architecture details
     print("\n3. Architecture verification:")
     print("   ✓ Initial embedding: 1 → 16 channels")
-    print("   ✓ Downsampling stages increase depth: 16 → 32 → 64 → 128 → 256 → 512 → 512")
+    print(
+        "   ✓ Downsampling stages increase depth: 16 → 32 → 64 → 128 → 256 → 512 → 512"
+    )
     print("   ✓ Each stage has 2 residual blocks")
     print("   ✓ Latent space is 16-dimensional Gaussian (mean + log_var)")
     print("   ✓ Decoder mirrors encoder architecture")

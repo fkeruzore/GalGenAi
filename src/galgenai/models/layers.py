@@ -55,7 +55,9 @@ class DownsampleBlock(nn.Module):
         use_batch_norm: Whether to use batch normalization.
     """
 
-    def __init__(self, in_channels: int, out_channels: int, use_batch_norm: bool = True):
+    def __init__(
+        self, in_channels: int, out_channels: int, use_batch_norm: bool = True
+    ):
         super().__init__()
 
         # Downsampling with stride 2
@@ -85,7 +87,9 @@ class UpsampleBlock(nn.Module):
         use_batch_norm: Whether to use batch normalization.
     """
 
-    def __init__(self, in_channels: int, out_channels: int, use_batch_norm: bool = True):
+    def __init__(
+        self, in_channels: int, out_channels: int, use_batch_norm: bool = True
+    ):
         super().__init__()
 
         # Two residual blocks at current resolution
