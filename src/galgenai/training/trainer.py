@@ -36,7 +36,9 @@ def vae_loss(
             reconstruction, x, reduction="sum"
         )
     else:
-        raise ValueError(f"Unknown reconstruction loss: {reconstruction_loss_fn}")
+        raise ValueError(
+            f"Unknown reconstruction loss: {reconstruction_loss_fn}"
+        )
 
     # KL divergence: -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
     kl_div = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
@@ -54,6 +56,7 @@ def train_epoch(
     device: torch.device,
     reconstruction_loss_fn: str = "mse",
     beta: float = 1.0,
+    scheduler: torch.optim.lr_scheduler._LRScheduler = None,
 ) -> Tuple[float, float, float]:
     """
     Train the VAE for one epoch.
@@ -130,6 +133,7 @@ def train(
     num_epochs: int,
     reconstruction_loss_fn: str = "mse",
     beta: float = 1.0,
+    scheduler: torch.optim.lr_scheduler._LRScheduler = None,
 ) -> None:
     """
     Train the VAE for multiple epochs.
@@ -142,18 +146,28 @@ def train(
         num_epochs: Number of epochs to train.
         reconstruction_loss_fn: Type of reconstruction loss.
         beta: Weight for KL divergence.
+        scheduler: Optional learning rate scheduler.
     """
     print(f"Training on device: {device}")
     print(f"Number of epochs: {num_epochs}")
     print(f"Reconstruction loss: {reconstruction_loss_fn}")
     print(f"Beta: {beta}")
+    if scheduler is not None:
+        print(f"Learning rate scheduler: {scheduler.__class__.__name__}")
     print("-" * 60)
 
     for epoch in range(1, num_epochs + 1):
-        print(f"\nEpoch {epoch}/{num_epochs}")
+        # Get current learning rate
+        current_lr = optimizer.param_groups[0]["lr"]
+        print(f"\nEpoch {epoch}/{num_epochs} (lr: {current_lr:.6f})")
 
         avg_total_loss, avg_recon_loss, avg_kl_loss = train_epoch(
-            model, train_loader, optimizer, device, reconstruction_loss_fn, beta
+            model,
+            train_loader,
+            optimizer,
+            device,
+            reconstruction_loss_fn,
+            beta,
         )
 
         print(
@@ -162,3 +176,7 @@ def train(
             f"Recon Loss: {avg_recon_loss:.4f}, "
             f"KL Loss: {avg_kl_loss:.4f}"
         )
+
+        # Step the scheduler after each epoch
+        if scheduler is not None:
+            scheduler.step()
