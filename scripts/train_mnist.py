@@ -12,6 +12,12 @@ from galgenai.training import train
 from galgenai.utils import get_device, get_device_name
 
 
+def collate_fn_no_labels(batch):
+    """Custom collate function that drops labels and returns only data."""
+    data, _ = zip(*batch)
+    return torch.stack(data)
+
+
 def get_mnist_dataloaders(batch_size: int = 128, num_workers: int = 4):
     """
     Load MNIST dataset and create dataloaders with 32x32 padding.
@@ -39,12 +45,20 @@ def get_mnist_dataloaders(batch_size: int = 128, num_workers: int = 4):
         root="./data", train=False, download=True, transform=transform
     )
 
-    # Create dataloaders
+    # Create dataloaders with custom collate function to drop labels
     train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        collate_fn=collate_fn_no_labels,
     )
     test_loader = DataLoader(
-        test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        collate_fn=collate_fn_no_labels,
     )
 
     return train_loader, test_loader
@@ -62,8 +76,8 @@ def visualize_reconstructions(model, test_loader, device, num_images=8):
     """
     model.eval()
 
-    # Get a batch of test images
-    data, _ = next(iter(test_loader))
+    # Get a batch of test images (no labels since we use collate_fn_no_labels)
+    data = next(iter(test_loader))
     data = data[:num_images].to(device)
 
     # Get reconstructions
@@ -130,13 +144,16 @@ def visualize_samples(model, device, num_samples=16):
 
 def main():
     """Main training script."""
+
+    torch.manual_seed(42)
+
     # Hyperparameters
-    BATCH_SIZE = 128
-    LATENT_DIM = 16
+    BATCH_SIZE = 128  # Larger batch size for more stable gradients
+    LATENT_DIM = 64
     LEARNING_RATE = 1e-3
-    NUM_EPOCHS = 10
+    NUM_EPOCHS = 10  # More epochs for better convergence
     INPUT_SIZE = 32  # Padded MNIST size
-    BETA = 1.0  # Beta-VAE parameter
+    BETA = 0.5  # Beta-VAE parameter (try 0.5 for better reconstruction)
 
     print("=" * 60)
     print("VAE Training on MNIST")
@@ -162,8 +179,12 @@ def main():
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {num_params:,}")
 
-    # Create optimizer
+    # Create optimizer - Adam is standard for VAEs
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    # optimizer = torch.optim.Adafactor(model.parameters(), lr=LEARNING_RATE)
+
+    # Create learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.75)
 
     # Train
     print("\nStarting training...")
@@ -176,6 +197,7 @@ def main():
         num_epochs=NUM_EPOCHS,
         reconstruction_loss_fn="mse",
         beta=BETA,
+        scheduler=scheduler,
     )
 
     print("\n" + "=" * 60)

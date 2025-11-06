@@ -80,7 +80,7 @@ def train_epoch(
 
     progress_bar = tqdm(dataloader, desc="Training")
 
-    for batch_idx, (data, _) in enumerate(progress_bar):
+    for batch_idx, data in enumerate(progress_bar):
         data = data.to(device)
 
         # Forward pass
