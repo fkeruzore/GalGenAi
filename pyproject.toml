@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "datasets>=4.4.1",
     "matplotlib>=3.10.7",
     "numpy>=2.3.4",
     "torch>=2.9.0",
@@ -21,3 +22,24 @@ galgenai = "galgenai:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "ruff>=0.14.3",
+]
+
+[project.optional-dependencies]
+investigate = [
+    "ipympl>=0.9.8",
+    "jupyter>=1.1.1",
+]
+
+[tool.ruff]
+line-length = 79
+
+[tool.ruff.lint]
+select = ["E", "F", "B"]
+
+[tool.ruff.format]
+docstring-code-format = true
