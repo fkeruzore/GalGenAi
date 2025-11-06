@@ -138,9 +138,13 @@ class VAEDecoder(nn.Module):
         # Output size formula: (input_size - 1) // 2 + 1
         self.initial_spatial_size = input_size
         for _ in range(self.num_stages):
-            self.initial_spatial_size = (self.initial_spatial_size - 1) // 2 + 1
+            self.initial_spatial_size = (
+                self.initial_spatial_size - 1
+            ) // 2 + 1
 
-        self.flatten_size = 512 * self.initial_spatial_size * self.initial_spatial_size
+        self.flatten_size = (
+            512 * self.initial_spatial_size * self.initial_spatial_size
+        )
 
         # Dense layer to expand from latent space
         self.fc = nn.Linear(latent_dim, self.flatten_size)
@@ -228,7 +232,10 @@ class VAEDecoder(nn.Module):
         # Resize to target size if needed
         if x.shape[-1] != self.target_size or x.shape[-2] != self.target_size:
             x = nn.functional.interpolate(
-                x, size=(self.target_size, self.target_size), mode='bilinear', align_corners=False
+                x,
+                size=(self.target_size, self.target_size),
+                mode="bilinear",
+                align_corners=False,
             )
 
         return x
