@@ -28,6 +28,9 @@ dev = [
     "pytest>=8.4.2",
     "ruff>=0.14.3",
 ]
+investigate = [
+    "jupytext>=1.18.1",
+]
 
 [project.optional-dependencies]
 investigate = [
