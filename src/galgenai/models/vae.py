@@ -13,7 +13,8 @@ class VAEEncoder(nn.Module):
 
     Architecture:
     - Initial dense embedding: 1 -> 16 channels
-    - 7 downsampling stages with depths: 16 -> 32 -> 64 -> 128 -> 256 -> 512 -> 512
+    - 7 downsampling stages with depths:
+      16 -> 32 -> 64 -> 128 -> 256 -> 512 -> 512
     - Each stage has 2 residual blocks
     - Final dense layer compresses to latent_dim (outputs mean and log_var)
 
@@ -62,7 +63,8 @@ class VAEEncoder(nn.Module):
 
         # Calculate spatial size after downsampling
         # Each DownsampleBlock uses Conv2d(kernel_size=3, stride=2, padding=1)
-        # Output size formula: (input_size + 2*padding - kernel_size) // stride + 1
+        # Output size formula:
+        # (input_size + 2*padding - kernel_size) // stride + 1
         # Which simplifies to: (input_size - 1) // 2 + 1
         final_spatial_size = input_size
         for _ in range(num_stages):
@@ -187,8 +189,8 @@ class VAEDecoder(nn.Module):
         # Final convolution to output channels
         self.final_conv = nn.Conv2d(16, out_channels, kernel_size=3, padding=1)
 
-        # Sigmoid activation to constrain output to [0,1]
-        self.sigmoid = nn.Sigmoid()
+        # Output activation: Softplus
+        self.out_activation = nn.Softplus()
 
         # Store target size for final resizing if needed
         self.target_size = input_size
@@ -201,7 +203,8 @@ class VAEDecoder(nn.Module):
             z: Latent vector of shape (batch_size, latent_dim).
 
         Returns:
-            Reconstructed image of shape (batch_size, out_channels, height, width).
+            Reconstructed image of shape
+            (batch_size, out_channels, height, width).
         """
         # Expand from latent space
         x = self.fc(z)
@@ -227,7 +230,7 @@ class VAEDecoder(nn.Module):
 
         # Final output
         x = self.final_conv(x)
-        x = self.sigmoid(x)
+        x = self.out_activation(x)
 
         # Resize to target size if needed
         if x.shape[-1] != self.target_size or x.shape[-2] != self.target_size:
