@@ -183,6 +183,7 @@ def train(
     reconstruction_loss_fn: str = "mse",
     beta: float = 1.0,
     scheduler: torch.optim.lr_scheduler._LRScheduler = None,
+    checkpoint_path: str = None,
 ) -> None:
     """
     Train the VAE for multiple epochs.
@@ -196,6 +197,9 @@ def train(
         reconstruction_loss_fn: Type of reconstruction loss.
         beta: Weight for KL divergence.
         scheduler: Optional learning rate scheduler.
+        checkpoint_path: Optional path to save checkpoints. If provided,
+            model state will be saved after each successful epoch and
+            restored if NaN is detected.
     """
     print(f"Training on device: {device}")
     print(f"Number of epochs: {num_epochs}")
@@ -203,6 +207,8 @@ def train(
     print(f"Beta: {beta}")
     if scheduler is not None:
         print(f"Learning rate scheduler: {scheduler.__class__.__name__}")
+    if checkpoint_path is not None:
+        print(f"Checkpointing enabled: {checkpoint_path}")
     print("-" * 60)
 
     for epoch in range(1, num_epochs + 1):
@@ -219,12 +225,38 @@ def train(
             beta,
         )
 
+        # Check if loss is NaN or Inf
+        import math
+        if not math.isfinite(avg_total_loss):
+            print("\n" + "=" * 60)
+            print("[ERROR] Non-finite loss detected during training!")
+            print(f"  Total Loss: {avg_total_loss}")
+            print(f"  Recon Loss: {avg_recon_loss}")
+            print(f"  KL Loss: {avg_kl_loss}")
+            if checkpoint_path is not None:
+                print(f"Restoring model from last checkpoint: {checkpoint_path}")
+                try:
+                    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+                    print("Model successfully restored to last good state.")
+                except FileNotFoundError:
+                    print("[WARNING] No checkpoint found. Model state not restored.")
+            else:
+                print("[WARNING] No checkpoint path provided. Cannot restore model.")
+            print("Stopping training early.")
+            print("=" * 60)
+            break
+
         print(
             f"Epoch {epoch} Summary - "
             f"Total Loss: {avg_total_loss:.4f}, "
             f"Recon Loss: {avg_recon_loss:.4f}, "
             f"KL Loss: {avg_kl_loss:.4f}"
         )
+
+        # Save checkpoint after successful epoch
+        if checkpoint_path is not None:
+            torch.save(model.state_dict(), checkpoint_path)
+            print(f"  Checkpoint saved: {checkpoint_path}")
 
         # Step the scheduler after each epoch
         if scheduler is not None:
