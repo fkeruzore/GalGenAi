@@ -155,6 +155,13 @@ def main():
     INPUT_SIZE = 32  # Padded MNIST size
     BETA = 0.5  # Beta-VAE parameter (try 0.5 for better reconstruction)
 
+    # Stability parameters (optional, uncomment to enable)
+    # MAX_GRAD_NORM = 1.0  # Clip gradients for stability
+    # LOGVAR_CLAMP = (-10.0, 10.0)  # Clamp log variance to prevent overflow
+    # WARMUP_EPOCHS = 3  # Linear LR warmup epochs
+    # DETECT_NAN_PER_BATCH = False  # Check for NaN after each batch
+    # CHECKPOINT_PATH = "vae_mnist_checkpoint.pt"  # Save checkpoints
+
     print("=" * 60)
     print("VAE Training on MNIST")
     print("=" * 60)
@@ -172,7 +179,12 @@ def main():
 
     # Create model
     print(f"\nInitializing VAE model (latent_dim={LATENT_DIM})...")
-    model = VAE(in_channels=1, latent_dim=LATENT_DIM, input_size=INPUT_SIZE)
+    model = VAE(
+        in_channels=1,
+        latent_dim=LATENT_DIM,
+        input_size=INPUT_SIZE,
+        # logvar_clamp=LOGVAR_CLAMP,  # Uncomment to enable in model
+    )
     model = model.to(device)
 
     # Count parameters
@@ -198,6 +210,12 @@ def main():
         reconstruction_loss_fn="mse",
         beta=BETA,
         scheduler=scheduler,
+        # Uncomment stability features below as needed:
+        # max_grad_norm=MAX_GRAD_NORM,  # Enable gradient clipping
+        # logvar_clamp=LOGVAR_CLAMP,  # Enable logvar clamping in loss
+        # warmup_epochs=WARMUP_EPOCHS,  # Enable LR warmup
+        # detect_nan_per_batch=DETECT_NAN_PER_BATCH,  # Batch-level NaN check
+        # checkpoint_path=CHECKPOINT_PATH,  # Save/restore checkpoints
     )
 
     print("\n" + "=" * 60)

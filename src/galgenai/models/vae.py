@@ -252,14 +252,22 @@ class VAE(nn.Module):
         in_channels: Number of input channels.
         latent_dim: Dimension of the latent space.
         input_size: Spatial size of input images (assumes square).
+        logvar_clamp: Optional tuple (min, max) to clamp log variance
+            in reparameterization for numerical stability. If None, no
+            clamping is applied. Recommended: (-10.0, 10.0).
     """
 
     def __init__(
-        self, in_channels: int = 1, latent_dim: int = 16, input_size: int = 32
+        self,
+        in_channels: int = 1,
+        latent_dim: int = 16,
+        input_size: int = 32,
+        logvar_clamp: tuple = None,
     ):
         super().__init__()
         self.encoder = VAEEncoder(in_channels, latent_dim, input_size)
         self.decoder = VAEDecoder(latent_dim, in_channels, input_size)
+        self.logvar_clamp = logvar_clamp
 
     def reparameterize(
         self, mu: torch.Tensor, logvar: torch.Tensor
@@ -274,6 +282,12 @@ class VAE(nn.Module):
         Returns:
             Sampled latent vector.
         """
+        # Clamp logvar for numerical stability if configured
+        if self.logvar_clamp is not None:
+            logvar = torch.clamp(
+                logvar, min=self.logvar_clamp[0], max=self.logvar_clamp[1]
+            )
+
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return mu + eps * std
