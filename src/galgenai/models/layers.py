@@ -10,20 +10,15 @@ class ResidualBlock(nn.Module):
 
     Args:
         channels: Number of input and output channels.
-        use_batch_norm: Whether to use batch normalization.
     """
 
-    def __init__(self, channels: int, use_batch_norm: bool = True):
+    def __init__(self, channels: int):
         super().__init__()
-        self.use_batch_norm = use_batch_norm
 
         self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(channels)
         self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
-
-        if use_batch_norm:
-            self.bn1 = nn.BatchNorm2d(channels)
-            self.bn2 = nn.BatchNorm2d(channels)
-
+        self.bn2 = nn.BatchNorm2d(channels)
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -31,13 +26,11 @@ class ResidualBlock(nn.Module):
         identity = x
 
         out = self.conv1(x)
-        if self.use_batch_norm:
-            out = self.bn1(out)
+        out = self.bn1(out)
         out = self.relu(out)
 
         out = self.conv2(out)
-        if self.use_batch_norm:
-            out = self.bn2(out)
+        out = self.bn2(out)
 
         out = out + identity
         out = self.relu(out)
@@ -52,12 +45,9 @@ class DownsampleBlock(nn.Module):
     Args:
         in_channels: Number of input channels.
         out_channels: Number of output channels.
-        use_batch_norm: Whether to use batch normalization.
     """
 
-    def __init__(
-        self, in_channels: int, out_channels: int, use_batch_norm: bool = True
-    ):
+    def __init__(self, in_channels: int, out_channels: int):
         super().__init__()
 
         # Downsampling with stride 2
@@ -66,8 +56,8 @@ class DownsampleBlock(nn.Module):
         )
 
         # Two residual blocks at the new resolution
-        self.res_block1 = ResidualBlock(out_channels, use_batch_norm)
-        self.res_block2 = ResidualBlock(out_channels, use_batch_norm)
+        self.res_block1 = ResidualBlock(out_channels)
+        self.res_block2 = ResidualBlock(out_channels)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass with downsampling and residual blocks."""
@@ -84,17 +74,14 @@ class UpsampleBlock(nn.Module):
     Args:
         in_channels: Number of input channels.
         out_channels: Number of output channels.
-        use_batch_norm: Whether to use batch normalization.
     """
 
-    def __init__(
-        self, in_channels: int, out_channels: int, use_batch_norm: bool = True
-    ):
+    def __init__(self, in_channels: int, out_channels: int):
         super().__init__()
 
         # Two residual blocks at current resolution
-        self.res_block1 = ResidualBlock(in_channels, use_batch_norm)
-        self.res_block2 = ResidualBlock(in_channels, use_batch_norm)
+        self.res_block1 = ResidualBlock(in_channels)
+        self.res_block2 = ResidualBlock(in_channels)
 
         # Upsampling with transposed convolution
         self.upsample = nn.ConvTranspose2d(
