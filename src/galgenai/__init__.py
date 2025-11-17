@@ -32,7 +32,3 @@ def main() -> None:
     """CLI entry point for galgenai."""
     print("GalGenAI - Generative AI models for galaxy images")
     print("Version:", __version__)
-    print(
-        "\nFor usage examples, see the README or run training scripts in the scripts/ directory."
-    )
-    print("Example: python scripts/train_mnist.py")
