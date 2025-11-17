@@ -2,80 +2,61 @@
 
 import torch
 import torch.nn as nn
-from typing import Tuple
+from typing import Tuple, List
 
 from .layers import DownsampleBlock, UpsampleBlock
 
 
 class VAEEncoder(nn.Module):
     """
-    VAE Encoder with 7 stages of downsampling using ResNet blocks.
-
-    Architecture:
-    - Initial dense embedding: 1 -> 16 channels
-    - 7 downsampling stages with depths:
-      16 -> 32 -> 64 -> 128 -> 256 -> 512 -> 512
-    - Each stage has 2 residual blocks
-    - Final dense layer compresses to latent_dim (outputs mean and log_var)
+    VAE Encoder with configurable stages of downsampling using ResNet blocks.
 
     Args:
         in_channels: Number of input channels (e.g., 1 for grayscale).
         latent_dim: Dimension of the latent space.
         input_size: Spatial size of input images (assumes square images).
+        channel_depths: List of channel depths for each downsampling stage.
     """
 
     def __init__(
-        self, in_channels: int = 1, latent_dim: int = 16, input_size: int = 32
+        self,
+        in_channels: int = 1,
+        latent_dim: int = 16,
+        input_size: int = 32,
+        channel_depths: List[int] = [16, 32, 64, 128, 256, 512, 512],
     ):
         super().__init__()
         self.latent_dim = latent_dim
         self.input_size = input_size
 
-        # Calculate the spatial size after 7 downsampling operations
-        # Each downsample reduces size by factor of 2
-        self.final_spatial_size = input_size // (
-            2**7
-        )  # 32 -> 0.25, need to handle carefully
-
         # Initial channel-wise dense embedding
         self.initial_conv = nn.Conv2d(
-            in_channels, 16, kernel_size=3, padding=1
+            in_channels, channel_depths[0], kernel_size=3, padding=1
         )
 
-        # 7 downsampling stages with increasing depth
-        # Depths: 16 -> 32 -> 64 -> 128 -> 256 -> 512 -> 512
-        self.stage1 = DownsampleBlock(16, 32)
-        self.stage2 = DownsampleBlock(32, 64)
-        self.stage3 = DownsampleBlock(64, 128)
-        self.stage4 = DownsampleBlock(128, 256)
-        self.stage5 = DownsampleBlock(256, 512)
-        self.stage6 = DownsampleBlock(512, 512)
-        self.stage7 = DownsampleBlock(512, 512)
+        # Downsampling stages
+        self.downsample_blocks = nn.ModuleList()
+        for i in range(len(channel_depths) - 1):
+            self.downsample_blocks.append(
+                DownsampleBlock(channel_depths[i], channel_depths[i + 1])
+            )
 
-        # Calculate flattened size after convolutions
-        # Determine number of stages based on input size
-        if input_size >= 128:
-            num_stages = 7
-        elif input_size >= 64:
-            num_stages = 6
-        else:
-            num_stages = 5
-
-        # Calculate spatial size after downsampling
-        # Each DownsampleBlock uses Conv2d(kernel_size=3, stride=2, padding=1)
-        # Output size formula:
-        # (input_size + 2*padding - kernel_size) // stride + 1
-        # Which simplifies to: (input_size - 1) // 2 + 1
-        final_spatial_size = input_size
-        for _ in range(num_stages):
-            final_spatial_size = (final_spatial_size - 1) // 2 + 1
-
-        # Calculate flattened size: channels * height * width
-        self.flatten_size = 512 * final_spatial_size * final_spatial_size
+        # Calculate flattened size dynamically
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, in_channels, input_size, input_size)
+            dummy_output = self.forward_conv(dummy_input)
+            self.flatten_size = dummy_output.view(-1).shape[0]
 
         # Dense layers for mean and log variance
         self.fc_mu = nn.Linear(self.flatten_size, latent_dim)
         self.fc_logvar = nn.Linear(self.flatten_size, latent_dim)
+
+    def forward_conv(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through convolutional layers."""
+        x = self.initial_conv(x)
+        for block in self.downsample_blocks:
+            x = block(x)
+        return x
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -87,29 +68,10 @@ class VAEEncoder(nn.Module):
         Returns:
             Tuple of (mu, log_var) for the latent distribution.
         """
-        # Initial embedding
-        x = self.initial_conv(x)
-
-        # Downsampling stages
-        x = self.stage1(x)
-        x = self.stage2(x)
-        x = self.stage3(x)
-        x = self.stage4(x)
-        x = self.stage5(x)
-
-        # Only use stages 6 and 7 if input is large enough
-        if self.input_size >= 64:
-            x = self.stage6(x)
-        if self.input_size >= 128:
-            x = self.stage7(x)
-
-        # Flatten
+        x = self.forward_conv(x)
         x = torch.flatten(x, start_dim=1)
-
-        # Latent distribution parameters
         mu = self.fc_mu(x)
         logvar = self.fc_logvar(x)
-
         return mu, logvar
 
 
@@ -121,79 +83,52 @@ class VAEDecoder(nn.Module):
         latent_dim: Dimension of the latent space.
         out_channels: Number of output channels (e.g., 1 for grayscale).
         input_size: Spatial size of target output images.
+        channel_depths: List of channel depths for each upsampling stage (should be reverse of encoder's).
     """
 
     def __init__(
-        self, latent_dim: int = 16, out_channels: int = 1, input_size: int = 32
+        self,
+        latent_dim: int = 16,
+        out_channels: int = 1,
+        input_size: int = 32,
+        channel_depths: List[int] = [512, 512, 256, 128, 64, 32, 16],
     ):
         super().__init__()
         self.latent_dim = latent_dim
         self.input_size = input_size
+        self.channel_depths = channel_depths
 
-        # Determine number of stages based on input size
-        self.num_stages = (
-            5 if input_size < 64 else (6 if input_size < 128 else 7)
+        # Calculate initial spatial size needed to match the encoder's output
+        # This is done by creating a dummy encoder and getting its output shape
+        dummy_encoder = VAEEncoder(
+            in_channels=out_channels,
+            latent_dim=latent_dim,
+            input_size=input_size,
+            channel_depths=[d for d in reversed(channel_depths)],
         )
-
-        # Calculate initial spatial size (same as encoder's final size)
-        # Each DownsampleBlock uses Conv2d(kernel_size=3, stride=2, padding=1)
-        # Output size formula: (input_size - 1) // 2 + 1
-        self.initial_spatial_size = input_size
-        for _ in range(self.num_stages):
-            self.initial_spatial_size = (
-                self.initial_spatial_size - 1
-            ) // 2 + 1
-
-        self.flatten_size = (
-            512 * self.initial_spatial_size * self.initial_spatial_size
-        )
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, out_channels, input_size, input_size)
+            dummy_output = dummy_encoder.forward_conv(dummy_input)
+            self.unflatten_size = dummy_output.shape[2:]
+            self.flatten_size = dummy_output.view(-1).shape[0]
 
         # Dense layer to expand from latent space
         self.fc = nn.Linear(latent_dim, self.flatten_size)
 
-        # Unflatten parameters
-        self.unflatten_channels = 512
-        self.unflatten_size = (
-            self.initial_spatial_size if self.initial_spatial_size > 0 else 1
-        )
-
-        # Upsampling stages (mirror of encoder)
-        # Depths: 512 -> 512 -> 256 -> 128 -> 64 -> 32 -> 16
-        if self.num_stages >= 7:
-            self.stage7 = UpsampleBlock(512, 512)
-            self.stage6 = UpsampleBlock(512, 256)
-        elif self.num_stages >= 6:
-            self.stage6 = UpsampleBlock(512, 256)
-        else:
-            # For 5 stages, start directly
-            pass
-
-        self.stage5 = UpsampleBlock(
-            512 if self.num_stages < 6 else 256,
-            256 if self.num_stages < 6 else 128,
-        )
-        self.stage4 = UpsampleBlock(
-            256 if self.num_stages < 6 else 128,
-            128 if self.num_stages < 6 else 64,
-        )
-        self.stage3 = UpsampleBlock(
-            128 if self.num_stages < 6 else 64,
-            64 if self.num_stages < 6 else 32,
-        )
-        self.stage2 = UpsampleBlock(
-            64 if self.num_stages < 6 else 32,
-            32 if self.num_stages < 6 else 16,
-        )
-        self.stage1 = UpsampleBlock(32 if self.num_stages < 6 else 16, 16)
+        # Upsampling stages
+        self.upsample_blocks = nn.ModuleList()
+        for i in range(len(channel_depths) - 1):
+            self.upsample_blocks.append(
+                UpsampleBlock(channel_depths[i], channel_depths[i + 1])
+            )
 
         # Final convolution to output channels
-        self.final_conv = nn.Conv2d(16, out_channels, kernel_size=3, padding=1)
+        self.final_conv = nn.Conv2d(
+            channel_depths[-1], out_channels, kernel_size=3, padding=1
+        )
 
         # Output activation: Softplus
         self.out_activation = nn.Softplus()
-
-        # Store target size for final resizing if needed
-        self.target_size = input_size
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         """
@@ -203,40 +138,21 @@ class VAEDecoder(nn.Module):
             z: Latent vector of shape (batch_size, latent_dim).
 
         Returns:
-            Reconstructed image of shape
-            (batch_size, out_channels, height, width).
+            Reconstructed image of shape (batch_size, out_channels, height, width).
         """
-        # Expand from latent space
         x = self.fc(z)
-        x = x.view(
-            -1,
-            self.unflatten_channels,
-            self.unflatten_size,
-            self.unflatten_size,
-        )
+        x = x.view(-1, self.channel_depths[0], *self.unflatten_size)
 
-        # Upsampling stages
-        if self.num_stages >= 7:
-            x = self.stage7(x)
-            x = self.stage6(x)
-        elif self.num_stages >= 6:
-            x = self.stage6(x)
+        for block in self.upsample_blocks:
+            x = block(x)
 
-        x = self.stage5(x)
-        x = self.stage4(x)
-        x = self.stage3(x)
-        x = self.stage2(x)
-        x = self.stage1(x)
-
-        # Final output
         x = self.final_conv(x)
         x = self.out_activation(x)
 
-        # Resize to target size if needed
-        if x.shape[-1] != self.target_size or x.shape[-2] != self.target_size:
+        if x.shape[-2:] != (self.input_size, self.input_size):
             x = nn.functional.interpolate(
                 x,
-                size=(self.target_size, self.target_size),
+                size=(self.input_size, self.input_size),
                 mode="bilinear",
                 align_corners=False,
             )
@@ -252,9 +168,7 @@ class VAE(nn.Module):
         in_channels: Number of input channels.
         latent_dim: Dimension of the latent space.
         input_size: Spatial size of input images (assumes square).
-        logvar_clamp: Optional tuple (min, max) to clamp log variance
-            in reparameterization for numerical stability. If None, no
-            clamping is applied. Recommended: (-10.0, 10.0).
+        channel_depths: List of channel depths for the encoder. The decoder will use the reverse.
     """
 
     def __init__(
@@ -262,12 +176,32 @@ class VAE(nn.Module):
         in_channels: int = 1,
         latent_dim: int = 16,
         input_size: int = 32,
-        logvar_clamp: tuple = None,
+        channel_depths: List[int] = [16, 32, 64, 128, 256, 512, 512],
     ):
         super().__init__()
-        self.encoder = VAEEncoder(in_channels, latent_dim, input_size)
-        self.decoder = VAEDecoder(latent_dim, in_channels, input_size)
-        self.logvar_clamp = logvar_clamp
+
+        # Determine number of stages based on input size to prevent spatial dimensions
+        # from becoming 1x1 too early, which can cause BatchNorm errors.
+        if input_size >= 128:
+            num_stages = 7
+        elif input_size >= 64:
+            num_stages = 6
+        else:
+            num_stages = 5
+
+        # Adjust channel_depths based on the determined number of stages
+        # The default channel_depths has 7 stages, so we slice it accordingly.
+        adjusted_channel_depths = channel_depths[:num_stages]
+
+        self.encoder = VAEEncoder(
+            in_channels, latent_dim, input_size, adjusted_channel_depths
+        )
+        self.decoder = VAEDecoder(
+            latent_dim,
+            in_channels,
+            input_size,
+            channel_depths=[d for d in reversed(adjusted_channel_depths)],
+        )
 
     def reparameterize(
         self, mu: torch.Tensor, logvar: torch.Tensor
@@ -282,12 +216,6 @@ class VAE(nn.Module):
         Returns:
             Sampled latent vector.
         """
-        # Clamp logvar for numerical stability if configured
-        if self.logvar_clamp is not None:
-            logvar = torch.clamp(
-                logvar, min=self.logvar_clamp[0], max=self.logvar_clamp[1]
-            )
-
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return mu + eps * std
