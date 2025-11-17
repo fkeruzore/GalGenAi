@@ -102,6 +102,8 @@ def train_epoch(
     logvar_clamp: Optional[Tuple[float, float]] = None,
     detect_nan_per_batch: bool = False,
     checkpoint_path: Optional[str] = None,
+    use_progress_bar: bool = True,
+    scheduler_step_frequency: str = "epoch",
 ) -> Tuple[float, float, float]:
     """
     Train the VAE for one epoch.
@@ -120,6 +122,8 @@ def train_epoch(
         detect_nan_per_batch: If True, check for NaN after each batch
             and stop training immediately if detected.
         checkpoint_path: Path to restore model from if NaN detected.
+        use_progress_bar: If True, display a tqdm progress bar.
+        scheduler_step_frequency: 'epoch' or 'batch'.
 
     Returns:
         Tuple of (avg_total_loss, avg_recon_loss, avg_kl_loss).
@@ -130,7 +134,9 @@ def train_epoch(
     kl_loss_sum = 0.0
     num_batches = 0
 
-    progress_bar = tqdm(dataloader, desc="Training")
+    progress_bar = (
+        tqdm(dataloader, desc="Training") if use_progress_bar else dataloader
+    )
 
     for _batch_idx, batch in enumerate(progress_bar):
         # Handle both single tensor and tuple formats
@@ -179,6 +185,10 @@ def train_epoch(
 
         optimizer.step()
 
+        # Step the scheduler after each batch if configured
+        if scheduler is not None and scheduler_step_frequency == "batch":
+            scheduler.step()
+
         # Batch-level NaN detection (optional, for early stopping)
         if detect_nan_per_batch:
             if not math.isfinite(total_loss.item()):
@@ -201,7 +211,7 @@ def train_epoch(
                 print("Stopping training early.")
                 print("=" * 60)
                 # Return NaN to signal caller to stop
-                return float('nan'), float('nan'), float('nan')
+                return float("nan"), float("nan"), float("nan")
 
         # Accumulate losses
         total_loss_sum += total_loss.item()
@@ -210,13 +220,14 @@ def train_epoch(
         num_batches += 1
 
         # Update progress bar
-        progress_bar.set_postfix(
-            {
-                "loss": f"{total_loss.item():.4f}",
-                "recon": f"{recon_loss.item():.4f}",
-                "kl": f"{kl_loss.item():.4f}",
-            }
-        )
+        if use_progress_bar:
+            progress_bar.set_postfix(
+                {
+                    "loss": f"{total_loss.item():.4f}",
+                    "recon": f"{recon_loss.item():.4f}",
+                    "kl": f"{kl_loss.item():.4f}",
+                }
+            )
 
     # Return average losses
     avg_total_loss = total_loss_sum / num_batches
@@ -235,11 +246,13 @@ def train(
     reconstruction_loss_fn: str = "mse",
     beta: float = 1.0,
     scheduler: torch.optim.lr_scheduler._LRScheduler = None,
+    scheduler_step_frequency: str = "epoch",
     checkpoint_path: str = None,
     max_grad_norm: Optional[float] = None,
     logvar_clamp: Optional[Tuple[float, float]] = None,
     warmup_epochs: int = 0,
     detect_nan_per_batch: bool = False,
+    use_progress_bar: bool = True,
 ) -> None:
     """
     Train the VAE for multiple epochs.
@@ -253,6 +266,7 @@ def train(
         reconstruction_loss_fn: Type of reconstruction loss.
         beta: Weight for KL divergence.
         scheduler: Optional learning rate scheduler (applied after warmup).
+        scheduler_step_frequency: When to step the scheduler ('epoch' or 'batch').
         checkpoint_path: Optional path to save checkpoints. If provided,
             model state will be saved after each successful epoch and
             restored if NaN is detected.
@@ -265,6 +279,7 @@ def train(
             from 0 to the base LR. Default: 0 (no warmup).
         detect_nan_per_batch: If True, check for NaN after every batch
             and stop immediately. Default: False (check per epoch only).
+        use_progress_bar: If True, display a tqdm progress bar.
     """
     print(f"Training on device: {device}")
     print(f"Number of epochs: {num_epochs}")
@@ -272,6 +287,7 @@ def train(
     print(f"Beta: {beta}")
     if scheduler is not None:
         print(f"Learning rate scheduler: {scheduler.__class__.__name__}")
+        print(f"Scheduler step frequency: {scheduler_step_frequency}")
     if checkpoint_path is not None:
         print(f"Checkpointing enabled: {checkpoint_path}")
     if max_grad_norm is not None:
@@ -301,7 +317,9 @@ def train(
 
         # Get current learning rate
         current_lr = optimizer.param_groups[0]["lr"]
-        warmup_suffix = " [warmup]" if (warmup_epochs > 0 and epoch <= warmup_epochs) else ""
+        warmup_suffix = (
+            " [warmup]" if (warmup_epochs > 0 and epoch <= warmup_epochs) else ""
+        )
         print(f"\nEpoch {epoch}/{num_epochs} (lr: {current_lr:.6f}){warmup_suffix}")
 
         avg_total_loss, avg_recon_loss, avg_kl_loss = train_epoch(
@@ -311,28 +329,19 @@ def train(
             device,
             reconstruction_loss_fn,
             beta,
+            scheduler if scheduler_step_frequency == "batch" else None,
             max_grad_norm=max_grad_norm,
             logvar_clamp=logvar_clamp,
             detect_nan_per_batch=detect_nan_per_batch,
             checkpoint_path=checkpoint_path,
+            use_progress_bar=use_progress_bar,
+            scheduler_step_frequency=scheduler_step_frequency,
         )
 
         # Check if loss is NaN or Inf (epoch-level check)
         if not math.isfinite(avg_total_loss):
             print("\n" + "=" * 60)
             print("[ERROR] Non-finite loss detected during training!")
-            print(f"  Total Loss: {avg_total_loss}")
-            print(f"  Recon Loss: {avg_recon_loss}")
-            print(f"  KL Loss: {avg_kl_loss}")
-            if checkpoint_path is not None:
-                print(f"Restoring model from last checkpoint: {checkpoint_path}")
-                try:
-                    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
-                    print("Model successfully restored to last good state.")
-                except FileNotFoundError:
-                    print("[WARNING] No checkpoint found. Model state not restored.")
-            else:
-                print("[WARNING] No checkpoint path provided. Cannot restore model.")
             print("Stopping training early.")
             print("=" * 60)
             break
@@ -350,5 +359,9 @@ def train(
             print(f"  Checkpoint saved: {checkpoint_path}")
 
         # Step the scheduler after warmup period
-        if scheduler is not None and epoch > warmup_epochs:
+        if (
+            scheduler is not None
+            and epoch > warmup_epochs
+            and scheduler_step_frequency == "epoch"
+        ):
             scheduler.step()
