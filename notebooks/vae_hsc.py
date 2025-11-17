@@ -2,7 +2,6 @@
 # # VAE on HSC images
 
 # %%
-import numpy as np
 import matplotlib.pyplot as plt
 
 import torch
@@ -27,18 +26,33 @@ bands = dataset_raw[0]["image"]["band"]
 # dataset.set_transform(lambda data: {"flux": data["image"]["flux"]})
 # dataset = dataset.map(lambda x: {"flux": x["image"]["flux"]}, remove_columns=["image"])
 
-# min/max
-mins = torch.Tensor(-2 * np.ones(len(bands)))
-maxs = torch.Tensor(99 * np.ones(len(bands)))
+# Calculate min/max from actual data for proper normalization
+# Note: This computes per-band min/max across all images
+print("Computing min/max values from dataset...")
+flux_list = [dataset_raw[i]["image"]["flux"] for i in range(len(dataset_raw))]
+flux_stacked = torch.stack(
+    flux_list
+)  # Shape: (n_images, n_bands, height, width)
+mins = flux_stacked.amin(dim=(0, 2, 3))  # Min per band
+maxs = flux_stacked.amax(dim=(0, 2, 3))  # Max per band
+print(f"Per-band min values: {mins.numpy()}")
+print(f"Per-band max values: {maxs.numpy()}")
 
 
 class FluxDataset(torch.utils.data.Dataset):
+    """
+    Custom dataset for HSC galaxy images with normalization.
+
+    Normalizes flux to [0, 1] range using min-max normalization per band.
+    Returns (flux_normalized, ivar, mask) tuples for masked weighted MSE loss.
+    """
+
     def __init__(
         self,
         hf_dataset,
         nx: int,
-        mins: torch.TensorType,
-        maxs: torch.TensorType,
+        mins: torch.Tensor,
+        maxs: torch.Tensor,
     ):
         self.dataset = hf_dataset
 

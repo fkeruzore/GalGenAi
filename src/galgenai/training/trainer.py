@@ -179,9 +179,7 @@ def train_epoch(
 
         # Gradient clipping for stability
         if max_grad_norm is not None:
-            torch.nn.utils.clip_grad_norm_(
-                model.parameters(), max_grad_norm
-            )
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
 
         optimizer.step()
 
@@ -266,7 +264,8 @@ def train(
         reconstruction_loss_fn: Type of reconstruction loss.
         beta: Weight for KL divergence.
         scheduler: Optional learning rate scheduler (applied after warmup).
-        scheduler_step_frequency: When to step the scheduler ('epoch' or 'batch').
+        scheduler_step_frequency: When to step the scheduler
+            ('epoch' or 'batch').
         checkpoint_path: Optional path to save checkpoints. If provided,
             model state will be saved after each successful epoch and
             restored if NaN is detected.
@@ -318,9 +317,14 @@ def train(
         # Get current learning rate
         current_lr = optimizer.param_groups[0]["lr"]
         warmup_suffix = (
-            " [warmup]" if (warmup_epochs > 0 and epoch <= warmup_epochs) else ""
+            " [warmup]"
+            if (warmup_epochs > 0 and epoch <= warmup_epochs)
+            else ""
         )
-        print(f"\nEpoch {epoch}/{num_epochs} (lr: {current_lr:.6f}){warmup_suffix}")
+        print(
+            f"\nEpoch {epoch}/{num_epochs} "
+            f"(lr: {current_lr:.6f}){warmup_suffix}"
+        )
 
         avg_total_loss, avg_recon_loss, avg_kl_loss = train_epoch(
             model,

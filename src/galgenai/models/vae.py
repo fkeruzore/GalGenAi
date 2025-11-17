@@ -2,7 +2,7 @@
 
 import torch
 import torch.nn as nn
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 from .layers import DownsampleBlock, UpsampleBlock
 
@@ -16,6 +16,9 @@ class VAEEncoder(nn.Module):
         latent_dim: Dimension of the latent space.
         input_size: Spatial size of input images (assumes square images).
         channel_depths: List of channel depths for each downsampling stage.
+        logvar_clamp: Optional tuple (min, max) to clamp logvar for numerical
+            stability. Prevents overflow in exp() during reparameterization.
+            Recommended: (-10.0, 10.0). Default: None (no clamping).
     """
 
     def __init__(
@@ -24,10 +27,12 @@ class VAEEncoder(nn.Module):
         latent_dim: int = 16,
         input_size: int = 32,
         channel_depths: List[int] = [16, 32, 64, 128, 256, 512, 512],
+        logvar_clamp: Optional[Tuple[float, float]] = None,
     ):
         super().__init__()
         self.latent_dim = latent_dim
         self.input_size = input_size
+        self.logvar_clamp = logvar_clamp
 
         # Initial channel-wise dense embedding
         self.initial_conv = nn.Conv2d(
@@ -72,6 +77,14 @@ class VAEEncoder(nn.Module):
         x = torch.flatten(x, start_dim=1)
         mu = self.fc_mu(x)
         logvar = self.fc_logvar(x)
+
+        # Clamp logvar for numerical stability if configured
+        # This prevents overflow in exp() during reparameterization
+        if self.logvar_clamp is not None:
+            logvar = torch.clamp(
+                logvar, min=self.logvar_clamp[0], max=self.logvar_clamp[1]
+            )
+
         return mu, logvar
 
 
@@ -83,7 +96,8 @@ class VAEDecoder(nn.Module):
         latent_dim: Dimension of the latent space.
         out_channels: Number of output channels (e.g., 1 for grayscale).
         input_size: Spatial size of target output images.
-        channel_depths: List of channel depths for each upsampling stage (should be reverse of encoder's).
+        channel_depths: List of channel depths for each upsampling stage
+        (should be reverse of encoder's).
     """
 
     def __init__(
@@ -105,6 +119,7 @@ class VAEDecoder(nn.Module):
             latent_dim=latent_dim,
             input_size=input_size,
             channel_depths=[d for d in reversed(channel_depths)],
+            logvar_clamp=None,  # Not needed for shape calculation
         )
         with torch.no_grad():
             dummy_input = torch.zeros(1, out_channels, input_size, input_size)
@@ -138,7 +153,7 @@ class VAEDecoder(nn.Module):
             z: Latent vector of shape (batch_size, latent_dim).
 
         Returns:
-            Reconstructed image of shape (batch_size, out_channels, height, width).
+            Reconstructed image of shape (batch_size, out_channels, h, w).
         """
         x = self.fc(z)
         x = x.view(-1, self.channel_depths[0], *self.unflatten_size)
@@ -168,7 +183,11 @@ class VAE(nn.Module):
         in_channels: Number of input channels.
         latent_dim: Dimension of the latent space.
         input_size: Spatial size of input images (assumes square).
-        channel_depths: List of channel depths for the encoder. The decoder will use the reverse.
+        channel_depths: List of channel depths for the encoder. The decoder
+            will use the reverse.
+        logvar_clamp: Optional tuple (min, max) to clamp logvar in encoder for
+            numerical stability. Prevents overflow during reparameterization.
+            Recommended: (-10.0, 10.0). Default: None (no clamping).
     """
 
     def __init__(
@@ -177,11 +196,13 @@ class VAE(nn.Module):
         latent_dim: int = 16,
         input_size: int = 32,
         channel_depths: List[int] = [16, 32, 64, 128, 256, 512, 512],
+        logvar_clamp: Optional[Tuple[float, float]] = None,
     ):
         super().__init__()
 
-        # Determine number of stages based on input size to prevent spatial dimensions
-        # from becoming 1x1 too early, which can cause BatchNorm errors.
+        # Determine number of stages based on input size to prevent spatial
+        # dimensions from becoming 1x1 too early, which can cause
+        # BatchNorm errors.
         if input_size >= 128:
             num_stages = 7
         elif input_size >= 64:
@@ -194,7 +215,11 @@ class VAE(nn.Module):
         adjusted_channel_depths = channel_depths[:num_stages]
 
         self.encoder = VAEEncoder(
-            in_channels, latent_dim, input_size, adjusted_channel_depths
+            in_channels,
+            latent_dim,
+            input_size,
+            adjusted_channel_depths,
+            logvar_clamp=logvar_clamp,
         )
         self.decoder = VAEDecoder(
             latent_dim,
