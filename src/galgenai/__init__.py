@@ -7,6 +7,7 @@ from .models import (
     ResidualBlock,
     DownsampleBlock,
     UpsampleBlock,
+    SqueezeExcitationBlock,
 )
 from .training import vae_loss, train_epoch, train
 from .utils import get_device, get_device_name
@@ -20,6 +21,7 @@ __all__ = [
     "ResidualBlock",
     "DownsampleBlock",
     "UpsampleBlock",
+    "SqueezeExcitationBlock",
     "vae_loss",
     "train_epoch",
     "train",

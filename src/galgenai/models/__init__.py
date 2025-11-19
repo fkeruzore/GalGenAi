@@ -1,7 +1,12 @@
 """Generative models for galaxy images."""
 
 from .vae import VAE, VAEEncoder, VAEDecoder
-from .layers import ResidualBlock, DownsampleBlock, UpsampleBlock
+from .layers import (
+    ResidualBlock,
+    DownsampleBlock,
+    UpsampleBlock,
+    SqueezeExcitationBlock,
+)
 
 __all__ = [
     "VAE",
@@ -10,4 +15,5 @@ __all__ = [
     "ResidualBlock",
     "DownsampleBlock",
     "UpsampleBlock",
+    "SqueezeExcitationBlock",
 ]
