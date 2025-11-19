@@ -172,9 +172,9 @@ def train_epoch(
         # Update progress bar
         progress_bar.set_postfix(
             {
-                "loss": f"{total_loss.item():.4f}",
-                "recon": f"{recon_loss.item():.4f}",
-                "kl": f"{kl_loss.item():.4f}",
+                "loss": f"{total_loss.item():.3e}",
+                "recon": f"{recon_loss.item():.3e}",
+                "kl": f"{kl_loss.item():.3e}",
             }
         )
 
@@ -248,7 +248,7 @@ def train(
 
         print(
             f"Epoch {epoch} Summary - "
-            f"Total Loss: {avg_total_loss:.4f}, "
-            f"Recon Loss: {avg_recon_loss:.4f}, "
-            f"KL Loss: {avg_kl_loss:.4f}"
+            f"Total Loss: {avg_total_loss:.3e}, "
+            f"Recon Loss: {avg_recon_loss:.3e}, "
+            f"KL Loss: {avg_kl_loss:.3e}"
         )
