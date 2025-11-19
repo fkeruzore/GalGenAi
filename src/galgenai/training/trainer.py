@@ -3,7 +3,7 @@
 import math
 import torch
 import torch.nn as nn
-from typing import Tuple
+from typing import Tuple, Optional
 from tqdm import tqdm
 
 
@@ -14,8 +14,8 @@ def vae_loss(
     logvar: torch.Tensor,
     reconstruction_loss_fn: str = "mse",
     beta: float = 1.0,
-    ivar: torch.Tensor = None,
-    mask: torch.Tensor = None,
+    ivar: Optional[torch.Tensor] = None,
+    mask: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Calculate VAE loss = reconstruction_loss + beta * KL_divergence.
@@ -87,7 +87,7 @@ def train_epoch(
     device: torch.device,
     reconstruction_loss_fn: str = "mse",
     beta: float = 1.0,
-    scheduler: torch.optim.lr_scheduler._LRScheduler = None,
+    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
     max_grad_norm: float = 1.0,
 ) -> Tuple[float, float, float]:
     """
@@ -194,7 +194,7 @@ def train(
     num_epochs: int,
     reconstruction_loss_fn: str = "mse",
     beta: float = 1.0,
-    scheduler: torch.optim.lr_scheduler._LRScheduler = None,
+    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
     max_grad_norm: float = 1.0,
 ) -> None:
     """
