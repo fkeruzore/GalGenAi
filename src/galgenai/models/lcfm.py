@@ -1,7 +1,8 @@
 """
 Latent Conditional Flow Matching (LCFM) Implementation
 
-Based on Samaddar et al. (2025) "Efficient Flow Matching using Latent Variables"
+Based on Samaddar et al. (2025) "Efficient Flow Matching using Latent
+Variables"
 
 Architecture:
 - Frozen VAE encoder extracts features from images
@@ -14,54 +15,14 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchdiffeq import odeint
 from typing import Tuple
-
-
-# =============================================================================
-# Building Blocks
-# =============================================================================
-
-
-class SinusoidalTimeEmbedding(nn.Module):
-    """
-    Sinusoidal positional embedding for time t ∈ [0, 1].
-
-    Maps scalar time to a high-dimensional vector using sin/cos at different
-    frequencies, similar to transformer positional encodings. This gives the
-    network a rich representation of where we are along the flow trajectory.
-    """
-
-    def __init__(self, dim: int):
-        super().__init__()
-        self.dim = dim
-
-    def forward(self, t: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            t: (batch,) tensor of times in [0, 1]
-        Returns:
-            (batch, dim) time embeddings
-        """
-        device = t.device
-        half_dim = self.dim // 2
-
-        # Frequencies span from 1 to 10000 on log scale
-        freqs = torch.exp(
-            -math.log(10000) * torch.arange(half_dim, device=device) / half_dim
-        )
-
-        # Outer product: (batch, 1) * (half_dim,) -> (batch, half_dim)
-        args = (
-            t[:, None] * freqs[None, :] * 1000
-        )  # scale up for better gradients
-
-        # Concatenate sin and cos
-        return torch.cat([torch.sin(args), torch.cos(args)], dim=-1)
 
 
 class ResBlock(nn.Module):
     """
-    Residual block with time/latent conditioning via adaptive group normalization.
+    Residual block with time/latent conditioning via adaptive group
+    normalization.
 
     The conditioning signal (time + latent embedding) modulates the features
     through scale and shift parameters after group normalization. This is the
@@ -118,7 +79,7 @@ class ResBlock(nn.Module):
         cond_params = self.cond_proj(cond)  # (batch, out_channels * 4)
         scale1, shift1, scale2, shift2 = cond_params.chunk(4, dim=1)
 
-        # Reshape for broadcasting: (batch, channels) -> (batch, channels, 1, 1)
+        # Reshape: (batch, channels) -> (batch, channels, 1, 1)
         scale1 = scale1[:, :, None, None]
         shift1 = shift1[:, :, None, None]
         scale2 = scale2[:, :, None, None]
@@ -191,29 +152,6 @@ class AttentionBlock(nn.Module):
         return x + self.proj(out)
 
 
-class Downsample(nn.Module):
-    """Spatial downsampling by factor of 2 using strided convolution."""
-
-    def __init__(self, channels: int):
-        super().__init__()
-        self.conv = nn.Conv2d(channels, channels, 3, stride=2, padding=1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.conv(x)
-
-
-class Upsample(nn.Module):
-    """Spatial upsampling by factor of 2 using nearest neighbor + conv."""
-
-    def __init__(self, channels: int):
-        super().__init__()
-        self.conv = nn.Conv2d(channels, channels, 3, padding=1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.interpolate(x, scale_factor=2, mode="nearest")
-        return self.conv(x)
-
-
 # =============================================================================
 # U-Net Velocity Field Network
 # =============================================================================
@@ -237,7 +175,8 @@ class VelocityUNet(nn.Module):
     - Conditioning: time and latent embeddings added and injected via AdaGN
 
     Hyperparameter choices (following Samaddar et al. for scientific data):
-    - Base channels: 64 (reduced from 128 since our images are 64x64 not 256x256)
+    - Base channels: 64 (reduced from 128 since our images are 64x64,
+      not 256x256)
     - Channel multipliers: [1, 2, 4, 4] gives [64, 128, 256, 256] channels
     - Attention at 16x16 and 8x8 resolutions
     - 2 residual blocks per resolution level
@@ -264,15 +203,14 @@ class VelocityUNet(nn.Module):
 
         # Time embedding: scalar -> vector
         time_dim = base_channels * 4
-        self.time_embed = nn.Sequential(
-            SinusoidalTimeEmbedding(base_channels),
+        self.time_mlp = nn.Sequential(
             nn.Linear(base_channels, time_dim),
             nn.SiLU(),
             nn.Linear(time_dim, time_dim),
         )
 
         # Latent embedding: project to same dimension as time
-        self.latent_embed = nn.Sequential(
+        self.latent_mlp = nn.Sequential(
             nn.Linear(latent_dim, time_dim),
             nn.SiLU(),
             nn.Linear(time_dim, time_dim),
@@ -308,7 +246,9 @@ class VelocityUNet(nn.Module):
 
             # Downsample except at last level
             if level < len(channels) - 1:
-                self.downsamplers.append(Downsample(ch))
+                self.downsamplers.append(
+                    nn.Conv2d(ch, ch, kernel_size=3, stride=2, padding=1)
+                )
                 current_res //= 2
             else:
                 self.downsamplers.append(nn.Identity())
@@ -357,7 +297,9 @@ class VelocityUNet(nn.Module):
 
             # Upsample except at last level
             if level < len(reversed_channels) - 1:
-                self.upsamplers.append(Upsample(out_ch))
+                self.upsamplers.append(
+                    nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1)
+                )
                 current_res *= 2
             else:
                 self.upsamplers.append(nn.Identity())
@@ -372,6 +314,21 @@ class VelocityUNet(nn.Module):
         # Initialize output conv to zero for stable training start
         nn.init.zeros_(self.conv_out[-1].weight)
         nn.init.zeros_(self.conv_out[-1].bias)
+
+    @staticmethod
+    def _sinusoidal_embedding(t: torch.Tensor, dim: int) -> torch.Tensor:
+        """
+        Sinusoidal positional embedding for scalar time t ∈ [0, 1].
+
+        Returns tensor of shape (batch, dim) with interleaved sin/cos terms.
+        """
+        device = t.device
+        half_dim = dim // 2
+        freqs = torch.exp(
+            -math.log(10000) * torch.arange(half_dim, device=device) / half_dim
+        )
+        args = t[:, None] * freqs[None, :] * 1000
+        return torch.cat([torch.sin(args), torch.cos(args)], dim=-1)
 
     def forward(
         self, x: torch.Tensor, f: torch.Tensor, t: torch.Tensor
@@ -388,8 +345,9 @@ class VelocityUNet(nn.Module):
             (batch, in_channels, 64, 64) predicted velocity
         """
         # Compute conditioning: time + latent embeddings (added together)
-        t_emb = self.time_embed(t)
-        f_emb = self.latent_embed(f)
+        t_emb = self._sinusoidal_embedding(t, self.base_channels)
+        t_emb = self.time_mlp(t_emb)
+        f_emb = self.latent_mlp(f)
         cond = t_emb + f_emb  # Simple addition, as in Samaddar et al.
 
         # Initial conv
@@ -398,7 +356,7 @@ class VelocityUNet(nn.Module):
         # Encoder - store outputs for skip connections
         skips = []
         for level_blocks, downsample in zip(
-            self.encoder_blocks, self.downsamplers
+            self.encoder_blocks, self.downsamplers, strict=True
         ):
             for block in level_blocks:
                 if isinstance(block, ResBlock):
@@ -417,7 +375,7 @@ class VelocityUNet(nn.Module):
 
         # Decoder with skip connections
         for level_blocks, upsample in zip(
-            self.decoder_blocks, self.upsamplers
+            self.decoder_blocks, self.upsamplers, strict=True
         ):
             # Concatenate skip connection
             skip = skips.pop()
@@ -429,7 +387,9 @@ class VelocityUNet(nn.Module):
                 else:
                     h = block(h)
 
-            h = upsample(h)
+            if not isinstance(upsample, nn.Identity):
+                h = F.interpolate(h, scale_factor=2, mode="nearest")
+                h = upsample(h)
 
         return self.conv_out(h)
 
@@ -446,7 +406,8 @@ class LatentStochasticLayer(nn.Module):
     Takes the (μ, logvar) from the frozen encoder and learns to refine them
     for the flow matching task. This is a key component from Samaddar et al.:
     rather than using the encoder's latent directly, we add a learnable layer
-    that can adapt the latent distribution specifically for conditioning the flow.
+    that can adapt the latent distribution specifically for conditioning the
+    flow.
 
     The KL divergence term in training encourages this distribution to stay
     close to N(0, I), which regularizes the latent space.
@@ -646,8 +607,9 @@ class LCFM(nn.Module):
         """
         Generate samples using the trained model.
 
-        Following Samaddar et al., we sample latents from the aggregate posterior
-        by encoding training images. This is different from sampling from N(0,I)!
+        Following Samaddar et al., we sample latents from the aggregate
+        posterior by encoding training images. This is different from sampling
+        from N(0,I)!
 
         Args:
             x_train: (batch, channels, H, W) training images to condition on
@@ -710,10 +672,6 @@ class LCFM(nn.Module):
         Returns:
             Generated samples
         """
-        try:
-            from torchdiffeq import odeint
-        except ImportError:
-            raise ImportError("Install torchdiffeq: pip install torchdiffeq")
 
         self.eval()
 

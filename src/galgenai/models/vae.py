@@ -48,13 +48,15 @@ class VAEEncoder(nn.Module):
                 DownsampleBlock(channel_depths[i], channel_depths[i + 1])
             )
 
-        # Calculate flattened size dynamically
-        # Use batch_size=2 to satisfy BatchNorm requirements
-        with torch.no_grad():
-            dummy_input = torch.zeros(2, in_channels, input_size, input_size)
-            dummy_output = self.forward_conv(dummy_input)
-            # Get size per sample (divide by batch size)
-            self.flatten_size = dummy_output.view(2, -1).shape[1]
+        # Analytic flattened size (no dummy forward/BatchNorm side effects)
+        num_downsamples = len(channel_depths) - 1
+        spatial = input_size // (2**num_downsamples)
+        if spatial < 1:
+            raise ValueError(
+                f"Input size {input_size} too small for {num_downsamples} "
+                "downsampling stages."
+            )
+        self.flatten_size = channel_depths[-1] * spatial * spatial
 
         # Dense layers for mean and log variance
         self.fc_mu = nn.Linear(self.flatten_size, latent_dim)
@@ -117,21 +119,16 @@ class VAEDecoder(nn.Module):
         self.input_size = input_size
         self.channel_depths = channel_depths
 
-        # Calculate initial spatial size needed to match the encoder's output
-        # This is done by creating a dummy encoder and getting its output shape
-        dummy_encoder = VAEEncoder(
-            in_channels=out_channels,
-            latent_dim=latent_dim,
-            input_size=input_size,
-            channel_depths=[d for d in reversed(channel_depths)],
-        )
-        # Use batch_size=2 to satisfy BatchNorm requirements
-        with torch.no_grad():
-            dummy_input = torch.zeros(2, out_channels, input_size, input_size)
-            dummy_output = dummy_encoder.forward_conv(dummy_input)
-            self.unflatten_size = dummy_output.shape[2:]
-            # Get size per sample (divide by batch size)
-            self.flatten_size = dummy_output.view(2, -1).shape[1]
+        # Analytic unflatten size (mirror of encoder downsampling)
+        num_upsamples = len(channel_depths) - 1
+        spatial = input_size // (2**num_upsamples)
+        if spatial < 1:
+            raise ValueError(
+                f"Input size {input_size} too small for {num_upsamples} "
+                "upsampling stages."
+            )
+        self.unflatten_size = (spatial, spatial)
+        self.flatten_size = channel_depths[0] * spatial * spatial
 
         # Dense layer to expand from latent space
         self.fc = nn.Linear(latent_dim, self.flatten_size)
