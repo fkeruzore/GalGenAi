@@ -8,6 +8,9 @@ from .models import (
     DownsampleBlock,
     UpsampleBlock,
     SqueezeExcitationBlock,
+    LCFM,
+    VelocityUNet,
+    LatentStochasticLayer,
 )
 from .training import vae_loss, train_epoch, train
 from .utils import get_device, get_device_name
@@ -22,6 +25,9 @@ __all__ = [
     "DownsampleBlock",
     "UpsampleBlock",
     "SqueezeExcitationBlock",
+    "LCFM",
+    "VelocityUNet",
+    "LatentStochasticLayer",
     "vae_loss",
     "train_epoch",
     "train",
