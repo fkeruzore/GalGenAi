@@ -49,10 +49,12 @@ class VAEEncoder(nn.Module):
             )
 
         # Calculate flattened size dynamically
+        # Use batch_size=2 to satisfy BatchNorm requirements
         with torch.no_grad():
-            dummy_input = torch.zeros(1, in_channels, input_size, input_size)
+            dummy_input = torch.zeros(2, in_channels, input_size, input_size)
             dummy_output = self.forward_conv(dummy_input)
-            self.flatten_size = dummy_output.view(-1).shape[0]
+            # Get size per sample (divide by batch size)
+            self.flatten_size = dummy_output.view(2, -1).shape[1]
 
         # Dense layers for mean and log variance
         self.fc_mu = nn.Linear(self.flatten_size, latent_dim)
@@ -123,11 +125,13 @@ class VAEDecoder(nn.Module):
             input_size=input_size,
             channel_depths=[d for d in reversed(channel_depths)],
         )
+        # Use batch_size=2 to satisfy BatchNorm requirements
         with torch.no_grad():
-            dummy_input = torch.zeros(1, out_channels, input_size, input_size)
+            dummy_input = torch.zeros(2, out_channels, input_size, input_size)
             dummy_output = dummy_encoder.forward_conv(dummy_input)
             self.unflatten_size = dummy_output.shape[2:]
-            self.flatten_size = dummy_output.view(-1).shape[0]
+            # Get size per sample (divide by batch size)
+            self.flatten_size = dummy_output.view(2, -1).shape[1]
 
         # Dense layer to expand from latent space
         self.fc = nn.Linear(latent_dim, self.flatten_size)
