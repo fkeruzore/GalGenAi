@@ -5,19 +5,23 @@ This script trains the Latent Conditional Flow Matching model.
 
 Assumptions about your codebase:
 1. You have a VAEEncoder class with forward(x) -> (mu, logvar)
-2. You have a PyTorch Dataset that returns galaxy images as tensors of shape (5, 64, 64)
-3. Images are normalized (we'll assume roughly zero-mean, unit variance per channel)
+2. You have a PyTorch Dataset that returns galaxy images as tensors of shape
+   (5, 64, 64)
+3. Images are normalized (we'll assume roughly zero-mean, unit variance per
+   channel)
 
 Hyperparameter choices explained:
 - Learning rate: 2e-4 (standard for flow matching, from Samaddar et al.)
 - Batch size: 128 (from paper; reduce if GPU memory limited)
-- Beta (KL weight): 0.001 (from Darcy flow experiments - scientific data benefits from
+- Beta (KL weight): 0.001 (from Darcy flow experiments - scientific data
+  benefits from
   lower beta to allow more information through the latent bottleneck)
 - Base channels: 64 (64x64 images don't need as many channels as 256x256)
-- Channel multipliers: [1, 2, 4, 4] -> [64, 128, 256, 256] channels at each resolution
+- Channel multipliers: [1, 2, 4, 4] -> [64, 128, 256, 256] channels at each
+  resolution
 - Dropout: 0.1 (standard regularization)
-- Training steps: 100K-600K depending on dataset size (paper uses 100K for 10K samples,
-  600K for 50K samples)
+- Training steps: 100K-600K depending on dataset size (paper uses 100K for 10K
+  samples, 600K for 50K samples)
 """
 
 import time
@@ -176,7 +180,8 @@ class LCFMTrainer:
         Execute single training step.
 
         Args:
-            batch: (batch_size, channels, H, W) images or tuple (flux, ivar, mask)
+            batch: (batch_size, channels, H, W) images or tuple
+                (flux, ivar, mask)
 
         Returns:
             Dictionary of loss components
@@ -310,16 +315,18 @@ class LCFMTrainer:
 
         The training process:
         1. Sample batch of galaxy images x₁
-        2. Encode x₁ -> latent f via frozen encoder + trainable stochastic layer
+        2. Encode x₁ -> latent f via frozen encoder + trainable stochastic
+           layer
         3. Sample noise x₀ ~ N(0, I) and time t ~ U(0, 1)
         4. Interpolate x_t = (1-t)x₀ + tx₁
-        5. Predict velocity v(x_t, f, t) and compute MSE with target u_t = x₁ - x₀
+        5. Predict velocity v(x_t, f, t) and compute MSE with target
+           u_t = x₁ - x₀
         6. Add KL regularization on latent distribution
         7. Backprop and update
         """
         print(f"\nStarting training from step {self.global_step}")
         print(
-            f"Training for {self.config.num_steps - self.global_step} more steps"
+            f"Training for {self.config.num_steps - self.global_step} steps"
         )
         print("-" * 60)
 
@@ -423,7 +430,8 @@ class LCFMTrainer:
                 val_metrics = self.validate()
                 if val_metrics:
                     print(
-                        f"Validation - Flow: {val_metrics['val_flow_loss']:.4f}, "
+                        "Validation - Flow: "
+                        f"{val_metrics['val_flow_loss']:.4f}, "
                         f"KL: {val_metrics['val_kl_loss']:.4f}"
                     )
 
