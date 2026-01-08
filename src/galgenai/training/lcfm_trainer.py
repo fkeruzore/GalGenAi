@@ -325,9 +325,7 @@ class LCFMTrainer:
         7. Backprop and update
         """
         print(f"\nStarting training from step {self.global_step}")
-        print(
-            f"Training for {self.config.num_steps - self.global_step} steps"
-        )
+        print(f"Training for {self.config.num_steps - self.global_step} steps")
         print("-" * 60)
 
         # Create infinite data iterator

@@ -70,9 +70,7 @@ class ResidualBlock(nn.Module):
 
         # Optional Squeeze-and-Excitation block
         self.se = (
-            SqueezeExcitationBlock(channels, se_reduction)
-            if use_se
-            else None
+            SqueezeExcitationBlock(channels, se_reduction) if use_se else None
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

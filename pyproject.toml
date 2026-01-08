@@ -43,7 +43,11 @@ investigate = [
 line-length = 79
 
 [tool.ruff.lint]
-select = ["E", "F", "B"]
+select = ["E", "F", "B", "W"]
+
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 72  # For docstrings and comments
 
 [tool.ruff.format]
 docstring-code-format = true
+
