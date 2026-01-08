@@ -7,7 +7,8 @@ import torch
 from torch.utils.data import DataLoader, random_split
 from datasets import load_from_disk
 
-from galgenai import VAE, get_device, get_device_name
+from galgenai.utils import get_device, get_device_name
+from galgenai.models import VAE
 from galgenai.training import train, vae_loss
 
 

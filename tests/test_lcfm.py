@@ -2,7 +2,7 @@
 
 import torch
 import pytest
-from galgenai import VAEEncoder
+from galgenai.models import VAEEncoder
 from galgenai.models.lcfm import (
     LCFM,
     VelocityUNet,
@@ -12,7 +12,7 @@ from galgenai.models.lcfm import (
 
 def test_lcfm_imports():
     """Test that LCFM classes can be imported"""
-    from galgenai import LCFM, VelocityUNet, LatentStochasticLayer
+    from galgenai.models.lcfm import LCFM, VelocityUNet, LatentStochasticLayer
 
     assert LCFM is not None
     assert VelocityUNet is not None
