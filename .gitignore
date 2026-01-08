@@ -10,7 +10,7 @@ wheels/
 .venv
 
 # Data and models
-data/
+./data/
 *.pt
 *.pth
 *.ckpt
