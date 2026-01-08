@@ -11,6 +11,7 @@ wheels/
 
 # Data and models
 /data/
+/notebooks/data/
 *.pt
 *.pth
 *.ckpt
