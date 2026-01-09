@@ -9,16 +9,19 @@ from .layers import DownsampleBlock, UpsampleBlock
 
 class VAEEncoder(nn.Module):
     """
-    VAE Encoder with configurable stages of downsampling using ResNet blocks.
+    VAE Encoder with configurable stages of downsampling using ResNet
+    blocks.
 
     Args:
         in_channels: Number of input channels (e.g., 1 for grayscale).
         latent_dim: Dimension of the latent space.
-        input_size: Spatial size of input images (assumes square images).
-        channel_depths: List of channel depths for each downsampling stage.
+        input_size: Spatial size of input images (assumes square
+            images).
+        channel_depths: List of channel depths for each downsampling
+            stage.
         logvar_clamp: Tuple (min, max) to clamp logvar for numerical
-            stability. Prevents overflow in exp() during reparameterization.
-            Default: (-30.0, 20.0).
+            stability. Prevents overflow in exp() during
+            reparameterization. Default: (-30.0, 20.0).
     """
 
     def __init__(
@@ -48,7 +51,8 @@ class VAEEncoder(nn.Module):
                 DownsampleBlock(channel_depths[i], channel_depths[i + 1])
             )
 
-        # Analytic flattened size (no dummy forward/BatchNorm side effects)
+        # Analytic flattened size (no dummy forward/BatchNorm side
+        # effects)
         num_downsamples = len(channel_depths) - 1
         spatial = input_size // (2**num_downsamples)
         if spatial < 1:
@@ -74,7 +78,8 @@ class VAEEncoder(nn.Module):
         Forward pass through encoder.
 
         Args:
-            x: Input tensor of shape (batch_size, in_channels, height, width).
+            x: Input tensor of shape (batch_size, in_channels, height,
+                width).
 
         Returns:
             Tuple of (mu, log_var) for the latent distribution.
@@ -156,7 +161,8 @@ class VAEDecoder(nn.Module):
             z: Latent vector of shape (batch_size, latent_dim).
 
         Returns:
-            Reconstructed image of shape (batch_size, out_channels, h, w).
+            Reconstructed image of shape (batch_size, out_channels, h,
+                w).
         """
         x = self.fc(z)
         x = x.view(-1, self.channel_depths[0], *self.unflatten_size)
@@ -186,11 +192,11 @@ class VAE(nn.Module):
         in_channels: Number of input channels.
         latent_dim: Dimension of the latent space.
         input_size: Spatial size of input images (assumes square).
-        channel_depths: List of channel depths for the encoder. The decoder
-            will use the reverse.
+        channel_depths: List of channel depths for the encoder. The
+            decoder will use the reverse.
         logvar_clamp: Tuple (min, max) to clamp logvar in encoder for
-            numerical stability. Prevents overflow during reparameterization.
-            Default: (-30.0, 20.0).
+            numerical stability. Prevents overflow during
+            reparameterization. Default: (-30.0, 20.0).
     """
 
     def __init__(
@@ -205,9 +211,9 @@ class VAE(nn.Module):
         if channel_depths is None:
             channel_depths = [16, 32, 64, 128, 256, 512, 512]
 
-        # Determine number of stages based on input size to prevent spatial
-        # dimensions from becoming 1x1 too early, which can cause
-        # BatchNorm errors.
+        # Determine number of stages based on input size to prevent
+        # spatial dimensions from becoming 1x1 too early, which can
+        # cause BatchNorm errors.
         if input_size >= 128:
             num_stages = 7
         elif input_size >= 64:
@@ -216,7 +222,8 @@ class VAE(nn.Module):
             num_stages = 5
 
         # Adjust channel_depths based on the determined number of stages
-        # The default channel_depths has 7 stages, so we slice it accordingly.
+        # The default channel_depths has 7 stages, so we slice it
+        # accordingly.
         adjusted_channel_depths = channel_depths[:num_stages]
 
         self.encoder = VAEEncoder(
@@ -257,7 +264,8 @@ class VAE(nn.Module):
         Forward pass through the VAE.
 
         Args:
-            x: Input tensor of shape (batch_size, in_channels, height, width).
+            x: Input tensor of shape (batch_size, in_channels, height,
+                width).
 
         Returns:
             Tuple of (reconstruction, mu, logvar).

@@ -5,23 +5,25 @@ This script trains the Latent Conditional Flow Matching model.
 
 Assumptions about your codebase:
 1. You have a VAEEncoder class with forward(x) -> (mu, logvar)
-2. You have a PyTorch Dataset that returns galaxy images as tensors of shape
-   (5, 64, 64)
-3. Images are normalized (we'll assume roughly zero-mean, unit variance per
-   channel)
+2. You have a PyTorch Dataset that returns galaxy images as tensors of
+   shape (5, 64, 64)
+3. Images are normalized (we'll assume roughly zero-mean, unit variance
+   per channel)
 
 Hyperparameter choices explained:
-- Learning rate: 2e-4 (standard for flow matching, from Samaddar et al.)
+- Learning rate: 2e-4 (standard for flow matching, from Samaddar et
+  al.)
 - Batch size: 128 (from paper; reduce if GPU memory limited)
 - Beta (KL weight): 0.001 (from Darcy flow experiments - scientific data
-  benefits from
-  lower beta to allow more information through the latent bottleneck)
-- Base channels: 64 (64x64 images don't need as many channels as 256x256)
-- Channel multipliers: [1, 2, 4, 4] -> [64, 128, 256, 256] channels at each
-  resolution
+  benefits from lower beta to allow more information through the latent
+  bottleneck)
+- Base channels: 64 (64x64 images don't need as many channels as
+  256x256)
+- Channel multipliers: [1, 2, 4, 4] -> [64, 128, 256, 256] channels at
+  each resolution
 - Dropout: 0.1 (standard regularization)
-- Training steps: 100K-600K depending on dataset size (paper uses 100K for 10K
-  samples, 600K for 50K samples)
+- Training steps: 100K-600K depending on dataset size (paper uses 100K
+  for 10K samples, 600K for 50K samples)
 """
 
 import time
@@ -123,7 +125,8 @@ class LCFMTrainer:
         (self.output_dir / "checkpoints").mkdir(exist_ok=True)
 
         # Optimizer: AdamW with weight decay
-        # Only optimize trainable parameters (latent layer + velocity net)
+        # Only optimize trainable parameters (latent layer + velocity
+        # net)
         trainable_params = [p for p in model.parameters() if p.requires_grad]
         self.optimizer = AdamW(
             trainable_params,
@@ -252,8 +255,9 @@ class LCFMTrainer:
         """
         Generate samples for visualization.
 
-        We need training images to get latents from. This is a key property
-        of LCFM: samples are conditioned on latents from real data.
+        We need training images to get latents from. This is a key
+        property of LCFM: samples are conditioned on latents from real
+        data.
         """
         self.model.eval()
 
@@ -315,8 +319,8 @@ class LCFMTrainer:
 
         The training process:
         1. Sample batch of galaxy images x₁
-        2. Encode x₁ -> latent f via frozen encoder + trainable stochastic
-           layer
+        2. Encode x₁ -> latent f via frozen encoder + trainable
+           stochastic layer
         3. Sample noise x₀ ~ N(0, I) and time t ~ U(0, 1)
         4. Interpolate x_t = (1-t)x₀ + tx₁
         5. Predict velocity v(x_t, f, t) and compute MSE with target
@@ -444,9 +448,9 @@ class LCFMTrainer:
         )
 
 
-# =============================================================================
+# =====================================================================
 # Example usage
-# =============================================================================
+# =====================================================================
 
 
 def create_model_and_trainer(
@@ -518,15 +522,16 @@ def create_model_and_trainer(
     return trainer
 
 
-# =============================================================================
+# =====================================================================
 # Standalone script
-# =============================================================================
+# =====================================================================
 
 if __name__ == "__main__":
     """
     Example of how to use the training script.
-    
-    You'll need to modify this to load your actual VAE encoder and dataset.
+
+    You'll need to modify this to load your actual VAE encoder and
+    dataset.
     """
 
     # === MODIFY THIS SECTION FOR YOUR CODEBASE ===
@@ -555,22 +560,23 @@ if __name__ == "__main__":
     print("""
     from your_vae import VAEEncoder
     from your_data import GalaxyDataset
-    
+
     # Load encoder
     encoder = VAEEncoder(latent_dim=32)
     encoder.load_state_dict(torch.load("vae_encoder.pt"))
-    
+
     # Load data
     train_data = GalaxyDataset("data/", split="train")
-    
+
     # Create trainer
     config = TrainingConfig(
         num_steps=100_000,
         beta=0.001,
         output_dir="./lcfm_galaxies"
     )
-    trainer = create_model_and_trainer(encoder, train_data, config=config)
-    
+    trainer = create_model_and_trainer(encoder, train_data,
+                                        config=config)
+
     # Train!
     trainer.train()
     """)

@@ -119,9 +119,11 @@ def mini_train(
     num_workers=8,
     seed=42,
 ):
+    n_pixels = batch_size * dataset.n_bands * dataset.nx**2
+    n_nits = batch_size * model.encoder.latent_dim
     print(
-        f"BATCH DIMENSION: {batch_size * dataset.n_bands * dataset.nx**2:.2e};",
-        f"# NITS: {batch_size * model.encoder.latent_dim:.2e}",
+        f"BATCH DIMENSION: {n_pixels:.2e};",
+        f"# NITS: {n_nits:.2e}",
     )
 
     torch.random.manual_seed(seed)
@@ -135,12 +137,6 @@ def mini_train(
         batch_size=batch_size,
         num_workers=num_workers,
         shuffle=True,
-    )
-    test_loader = DataLoader(
-        dataset_test,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        shuffle=False,
     )
 
     # Get first batch for sanity check

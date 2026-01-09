@@ -24,13 +24,15 @@ class ResBlock(nn.Module):
     Residual block with time/latent conditioning via adaptive group
     normalization.
 
-    The conditioning signal (time + latent embedding) modulates the features
-    through scale and shift parameters after group normalization. This is the
-    standard approach in diffusion/flow models (e.g., ADM, DiT).
+    The conditioning signal (time + latent embedding) modulates the
+    features through scale and shift parameters after group
+    normalization. This is the standard approach in diffusion/flow
+    models (e.g., ADM, DiT).
 
     Architecture:
         x -> GroupNorm -> scale/shift by cond -> SiLU -> Conv
-          -> GroupNorm -> scale/shift by cond -> SiLU -> Dropout -> Conv -> + x
+          -> GroupNorm -> scale/shift by cond -> SiLU -> Dropout
+          -> Conv -> + x
     """
 
     def __init__(
@@ -110,10 +112,12 @@ class ResBlock(nn.Module):
 
 class AttentionBlock(nn.Module):
     """
-    Self-attention block for capturing long-range spatial dependencies.
+    Self-attention block for capturing long-range spatial
+    dependencies.
 
-    Applied at lower resolutions (e.g., 8x8, 16x16) where the computational
-    cost is manageable. Uses multi-head attention with QKV projection.
+    Applied at lower resolutions (e.g., 8x8, 16x16) where the
+    computational cost is manageable. Uses multi-head attention with QKV
+    projection.
     """
 
     def __init__(self, channels: int, num_heads: int = 4, num_groups: int = 8):
@@ -152,9 +156,9 @@ class AttentionBlock(nn.Module):
         return x + self.proj(out)
 
 
-# =============================================================================
+# =====================================================================
 # U-Net Velocity Field Network
-# =============================================================================
+# =====================================================================
 
 
 class VelocityUNet(nn.Module):
@@ -171,13 +175,17 @@ class VelocityUNet(nn.Module):
     Architecture follows standard U-Net with:
     - Encoder: progressively downsamples while increasing channels
     - Middle: self-attention at lowest resolution
-    - Decoder: progressively upsamples with skip connections from encoder
-    - Conditioning: time and latent embeddings added and injected via AdaGN
+    - Decoder: progressively upsamples with skip connections from
+      encoder
+    - Conditioning: time and latent embeddings added and injected via
+      AdaGN
 
-    Hyperparameter choices (following Samaddar et al. for scientific data):
+    Hyperparameter choices (following Samaddar et al. for scientific
+    data):
     - Base channels: 64 (reduced from 128 since our images are 64x64,
       not 256x256)
-    - Channel multipliers: [1, 2, 4, 4] gives [64, 128, 256, 256] channels
+    - Channel multipliers: [1, 2, 4, 4] gives [64, 128, 256, 256]
+      channels
     - Attention at 16x16 and 8x8 resolutions
     - 2 residual blocks per resolution level
     """
@@ -320,7 +328,8 @@ class VelocityUNet(nn.Module):
         """
         Sinusoidal positional embedding for scalar time t ∈ [0, 1].
 
-        Returns tensor of shape (batch, dim) with interleaved sin/cos terms.
+        Returns tensor of shape (batch, dim) with interleaved sin/cos
+        terms.
         """
         device = t.device
         half_dim = dim // 2
@@ -344,7 +353,8 @@ class VelocityUNet(nn.Module):
         Returns:
             (batch, in_channels, 64, 64) predicted velocity
         """
-        # Compute conditioning: time + latent embeddings (added together)
+        # Compute conditioning: time + latent embeddings (added
+        # together)
         t_emb = self._sinusoidal_embedding(t, self.base_channels)
         t_emb = self.time_mlp(t_emb)
         f_emb = self.latent_mlp(f)
@@ -394,23 +404,23 @@ class VelocityUNet(nn.Module):
         return self.conv_out(h)
 
 
-# =============================================================================
+# =====================================================================
 # Latent Stochastic Layer
-# =============================================================================
+# =====================================================================
 
 
 class LatentStochasticLayer(nn.Module):
     """
     Trainable stochastic layer on top of frozen VAE encoder.
 
-    Takes the (μ, logvar) from the frozen encoder and learns to refine them
-    for the flow matching task. This is a key component from Samaddar et al.:
-    rather than using the encoder's latent directly, we add a learnable layer
-    that can adapt the latent distribution specifically for conditioning the
-    flow.
+    Takes the (μ, logvar) from the frozen encoder and learns to refine
+    them for the flow matching task. This is a key component from
+    Samaddar et al.: rather than using the encoder's latent directly, we
+    add a learnable layer that can adapt the latent distribution
+    specifically for conditioning the flow.
 
-    The KL divergence term in training encourages this distribution to stay
-    close to N(0, I), which regularizes the latent space.
+    The KL divergence term in training encourages this distribution to
+    stay close to N(0, I), which regularizes the latent space.
     """
 
     def __init__(self, latent_dim: int = 32, hidden_dim: int = 64):
@@ -442,7 +452,8 @@ class LatentStochasticLayer(nn.Module):
         """
         Args:
             mu_enc: (batch, latent_dim) mean from frozen encoder
-            logvar_enc: (batch, latent_dim) log-variance from frozen encoder
+            logvar_enc: (batch, latent_dim) log-variance from frozen
+                encoder
 
         Returns:
             f: (batch, latent_dim) sampled latent (reparameterized)
@@ -468,9 +479,9 @@ class LatentStochasticLayer(nn.Module):
         return f, mu, logvar
 
 
-# =============================================================================
+# =====================================================================
 # Full LCFM Model
-# =============================================================================
+# =====================================================================
 
 
 class LCFM(nn.Module):
@@ -548,7 +559,8 @@ class LCFM(nn.Module):
 
         Args:
             x1: (batch, channels, H, W) real images from dataset
-            return_components: if True, also return individual loss terms
+            return_components: if True, also return individual loss
+                terms
 
         Returns:
             loss: scalar loss value
@@ -608,11 +620,12 @@ class LCFM(nn.Module):
         Generate samples using the trained model.
 
         Following Samaddar et al., we sample latents from the aggregate
-        posterior by encoding training images. This is different from sampling
-        from N(0,I)!
+        posterior by encoding training images. This is different from
+        sampling from N(0,I)!
 
         Args:
-            x_train: (batch, channels, H, W) training images to condition on
+            x_train: (batch, channels, H, W) training images to
+                condition on
             num_steps: number of ODE integration steps (Euler method)
             return_trajectory: if True, return intermediate states
 
@@ -660,7 +673,8 @@ class LCFM(nn.Module):
         atol: float = 1e-5,
     ) -> torch.Tensor:
         """
-        Generate samples using adaptive ODE solver (requires torchdiffeq).
+        Generate samples using adaptive ODE solver (requires
+        torchdiffeq).
 
         This is more accurate than fixed-step Euler but slower.
 

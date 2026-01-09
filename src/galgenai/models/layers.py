@@ -53,7 +53,8 @@ class ResidualBlock(nn.Module):
 
     Args:
         channels: Number of input and output channels.
-        use_se: Whether to use Squeeze-and-Excitation block (default: True).
+        use_se: Whether to use Squeeze-and-Excitation block
+            (default: True).
         se_reduction: Reduction ratio for SE block (default: 8).
     """
 
@@ -74,7 +75,8 @@ class ResidualBlock(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass with skip connection and optional SE attention."""
+        """Forward pass with skip connection and optional SE
+        attention."""
         identity = x
 
         out = self.conv1(x)
@@ -96,7 +98,8 @@ class ResidualBlock(nn.Module):
 
 class DownsampleBlock(nn.Module):
     """
-    Downsampling block with two residual blocks and spatial downsampling.
+    Downsampling block with two residual blocks and spatial
+    downsampling.
 
     Args:
         in_channels: Number of input channels.

@@ -29,8 +29,8 @@ def vae_loss(
         reconstruction_loss_fn: Type of reconstruction loss ('mse' or
             'masked_weighted_mse').
         beta: Weight for KL divergence term (beta-VAE).
-        ivar: Inverse variance weights for each pixel (optional, required
-            for 'masked_weighted_mse').
+        ivar: Inverse variance weights for each pixel (optional,
+            required for 'masked_weighted_mse').
         mask: Boolean mask indicating valid pixels (optional, required
             for 'masked_weighted_mse').
 
@@ -53,7 +53,8 @@ def vae_loss(
         weighted_error = squared_error * ivar * mask.float()
 
         # Sum over all pixels and normalize by number of valid pixels
-        # This makes the loss scale-invariant w.r.t. number of valid pixels
+        # This makes the loss scale-invariant w.r.t. number of valid
+        # pixels
         num_valid_pixels = mask.float().sum()
         recon_loss = weighted_error.sum() / num_valid_pixels.clamp(min=1.0)
 
@@ -71,7 +72,8 @@ def vae_loss(
         )
 
     # KL divergence: -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-    # Note: logvar is already clamped by the encoder for numerical stability
+    # Note: logvar is already clamped by the encoder for numerical
+    # stability
     kl_div = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
     # Total loss
