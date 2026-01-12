@@ -62,6 +62,7 @@ dataset, train_loader, val_loader = get_dataset_and_loaders(
     dataset_raw,
     nx=64,  # Crop size (64x64 pixels)
     batch_size=32,  # Batch size for training
+    num_workers=0
 )
 print(f"Dataset size: {len(dataset)} samples")
 print(f"Train batches: {len(train_loader)}, Val batches: {len(val_loader)}")
@@ -92,7 +93,7 @@ print(f"VAE parameters: {sum(p.numel() for p in vae.parameters()):,}")
 #   variance weights and masks for bad pixels/noise
 # - beta=1.0: standard VAE
 vae_config = VAETrainingConfig(
-    num_epochs=5,
+    num_epochs=3,
     learning_rate=1e-3,
     reconstruction_loss_fn="masked_weighted_mse",
     beta=1.0,
@@ -176,14 +177,14 @@ lcfm_config = LCFMTrainingConfig(
     latent_dim=32,
     in_channels=5,
     base_channels=64,
-    num_steps=5000,
+    num_steps=500,
     batch_size=32,
     learning_rate=2e-4,
-    warmup_steps=500,
+    warmup_steps=50,
     beta=0.001,
-    sample_every=2500,  # Generate samples every 2500 steps
-    save_every=5000,  # Save checkpoint at the end
-    log_every=100,  # Log every 100 steps
+    sample_every=250,  # Generate samples every 2500 steps
+    save_every=500,  # Save checkpoint at the end
+    log_every=50,  # Log every 100 steps
     output_dir=str(output_dir / "lcfm"),
     device=str(device),
 )
