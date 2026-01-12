@@ -79,8 +79,6 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
 
     def _train_step(self, batch: Any) -> Dict[str, float]:
         """Execute single LCFM training step."""
-        self.model.train()
-
         x, _, _ = extract_batch_data(batch, self.device)
 
         # Compute loss using model method
@@ -145,6 +143,13 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         print(f"\nStarting training from step {self.global_step}")
         print(f"Training for {self.config.num_steps - self.global_step} steps")
         print("-" * 60)
+
+        self.model.train()
+        try:
+            self.model = torch.compile(self.model)
+            print("Model compiled with torch.compile()")
+        except RuntimeError:
+            print("torch.compile() not available, skipping")
 
         def infinite_loader():
             while True:

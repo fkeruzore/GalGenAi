@@ -52,8 +52,6 @@ class VAETrainer(BaseTrainer[VAETrainingConfig]):
 
     def _train_step(self, batch: Any) -> Dict[str, float]:
         """Execute single VAE training step."""
-        self.model.train()
-
         data, ivar, mask = extract_batch_data(batch, self.device)
 
         # Forward pass
@@ -176,6 +174,14 @@ class VAETrainer(BaseTrainer[VAETrainingConfig]):
         print(f"Beta: {self.config.beta}")
         print(f"Gradient clipping: max_norm={self.config.max_grad_norm}")
         print("-" * 60)
+
+        self.model.train()
+        try:
+            self.model = torch.compile(self.model)
+            print("Model compiled with torch.compile()")
+        except RuntimeError:
+            print("torch.compile() not available, skipping")
+
 
         start_epoch = self.current_epoch + 1
 
