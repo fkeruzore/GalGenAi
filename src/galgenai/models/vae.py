@@ -6,6 +6,30 @@ from typing import Tuple, List, Optional
 
 from .layers import DownsampleBlock, UpsampleBlock
 
+# Default channel progression for the VAE architecture
+_DEFAULT_CHANNEL_DEPTHS = [16, 32, 64, 128, 256, 512, 512]
+
+
+def _get_num_stages(input_size: int) -> int:
+    """
+    Determine number of stages based on input size.
+
+    This prevents spatial dimensions from becoming too small during
+    downsampling (which would cause BatchNorm errors with size 1x1).
+
+    Args:
+        input_size: Spatial size of input images (assumes square).
+
+    Returns:
+        Number of stages (channel depth levels) to use.
+    """
+    if input_size >= 128:
+        return 7
+    elif input_size >= 64:
+        return 6
+    else:
+        return 5
+
 
 class VAEEncoder(nn.Module):
     """
@@ -34,7 +58,9 @@ class VAEEncoder(nn.Module):
     ):
         super().__init__()
         if channel_depths is None:
-            channel_depths = [16, 32, 64, 128, 256, 512, 512]
+            num_stages = _get_num_stages(input_size)
+            channel_depths = _DEFAULT_CHANNEL_DEPTHS[:num_stages]
+
         self.latent_dim = latent_dim
         self.input_size = input_size
         self.logvar_clamp = logvar_clamp
@@ -119,7 +145,9 @@ class VAEDecoder(nn.Module):
     ):
         super().__init__()
         if channel_depths is None:
-            channel_depths = [512, 512, 256, 128, 64, 32, 16]
+            num_stages = _get_num_stages(input_size)
+            channel_depths = _DEFAULT_CHANNEL_DEPTHS[:num_stages][::-1]
+
         self.latent_dim = latent_dim
         self.input_size = input_size
         self.channel_depths = channel_depths
@@ -209,21 +237,10 @@ class VAE(nn.Module):
     ):
         super().__init__()
         if channel_depths is None:
-            channel_depths = [16, 32, 64, 128, 256, 512, 512]
+            channel_depths = _DEFAULT_CHANNEL_DEPTHS
 
-        # Determine number of stages based on input size to prevent
-        # spatial dimensions from becoming 1x1 too early, which can
-        # cause BatchNorm errors.
-        if input_size >= 128:
-            num_stages = 7
-        elif input_size >= 64:
-            num_stages = 6
-        else:
-            num_stages = 5
-
-        # Adjust channel_depths based on the determined number of stages
-        # The default channel_depths has 7 stages, so we slice it
-        # accordingly.
+        # Adjust channel_depths based on input size
+        num_stages = _get_num_stages(input_size)
         adjusted_channel_depths = channel_depths[:num_stages]
 
         self.encoder = VAEEncoder(
