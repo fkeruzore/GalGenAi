@@ -9,7 +9,7 @@ from datasets import load_from_disk
 
 from galgenai.utils import get_device, get_device_name
 from galgenai.models import VAE
-from galgenai.training import train, vae_loss
+from galgenai.training import VAETrainer, VAETrainingConfig, vae_loss
 
 
 device = get_device()
@@ -159,16 +159,17 @@ def mini_train(
         )
 
     # Warm up
-    train(
-        model=model,
-        train_loader=train_loader,
-        optimizer=torch.optim.Adam(model.parameters(), lr=lr),
-        device=device,
+    config = VAETrainingConfig(
         num_epochs=num_epochs,
+        learning_rate=lr,
         reconstruction_loss_fn="masked_weighted_mse",
         beta=1.0,
         max_grad_norm=2.0,
+        output_dir="./test_vae_output",
+        save_every=1000,  # Don't save checkpoints during test
     )
+    trainer = VAETrainer(model=model, train_loader=train_loader, config=config)
+    trainer.train()
 
     # Compute final loss after training
     model.eval()

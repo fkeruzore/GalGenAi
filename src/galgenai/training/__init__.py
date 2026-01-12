@@ -1,12 +1,23 @@
-"""Training utilities and functions."""
+"""Training utilities and trainers."""
 
-from .trainer import vae_loss, train_epoch, train
-from .lcfm_trainer import LCFMTrainer, TrainingConfig as LCFMConfig
+from .base_trainer import BaseTrainer
+from .config import BaseTrainingConfig, LCFMTrainingConfig, VAETrainingConfig
+from .lcfm_trainer import LCFMTrainer, create_lcfm_trainer
+from .utils import extract_batch_data, vae_loss
+from .vae_trainer import VAETrainer
 
 __all__ = [
-    "vae_loss",
-    "train_epoch",
-    "train",
+    # Configs
+    "BaseTrainingConfig",
+    "VAETrainingConfig",
+    "LCFMTrainingConfig",
+    # Trainers
+    "BaseTrainer",
+    "VAETrainer",
     "LCFMTrainer",
-    "LCFMConfig",
+    # Factory
+    "create_lcfm_trainer",
+    # Utilities
+    "vae_loss",
+    "extract_batch_data",
 ]

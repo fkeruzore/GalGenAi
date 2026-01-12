@@ -48,24 +48,24 @@ samples = model.generate(num_samples=16, device=device)
 ## Training Custom Models
 
 ```py
-from galgenai.training import train
+from galgenai.models import VAE
+from galgenai.training import VAETrainer, VAETrainingConfig
 from torch.utils.data import DataLoader
 
 # Prepare your dataloader
 train_loader = DataLoader(your_dataset, batch_size=128, shuffle=True)
 
-# Create model and optimizer
-model = VAE(in_channels=1, latent_dim=16, input_size=32).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+# Create model and config
+model = VAE(in_channels=1, latent_dim=16, input_size=32)
+config = VAETrainingConfig(
+    num_epochs=10,
+    learning_rate=1e-3,
+    reconstruction_loss_fn="mse",
+    beta=1.0,  # Beta-VAE parameter
+    output_dir="./vae_output",
+)
 
 # Train
-train(
-	model=model,
-	train_loader=train_loader,
-	optimizer=optimizer,
-	device=device,
-	num_epochs=10,
-	reconstruction_loss_fn="mse",
-	beta=1.0,  # Beta-VAE parameter
-)
+trainer = VAETrainer(model=model, train_loader=train_loader, config=config)
+trainer.train()
 ```
