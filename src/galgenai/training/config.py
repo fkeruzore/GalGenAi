@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
+from .schedules import ScheduleConfig
+
 
 @dataclass
 class BaseTrainingConfig:
@@ -32,6 +34,9 @@ class VAETrainingConfig(BaseTrainingConfig):
     # VAE-specific parameters
     reconstruction_loss_fn: str = "mse"
     beta: float = 1.0
+    beta_schedule: Optional[ScheduleConfig] = (
+        None  # If None, use constant beta
+    )
 
     # Epoch-based training
     num_epochs: int = 10
@@ -63,6 +68,9 @@ class LCFMTrainingConfig(BaseTrainingConfig):
 
     # LCFM-specific loss
     beta: float = 0.001
+    beta_schedule: Optional[ScheduleConfig] = (
+        None  # If None, use constant beta
+    )
 
     # Step-based training
     num_steps: int = 100_000

@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from .base_trainer import BaseTrainer
 from .config import VAETrainingConfig
+from .schedules import Schedule
 from .utils import extract_batch_data, vae_loss
 
 
@@ -35,24 +36,39 @@ class VAETrainer(BaseTrainer[VAETrainingConfig]):
         super().__init__(model, train_loader, config, val_loader)
 
     def _setup_optimizer(self):
-        """Set up Adam optimizer and optional scheduler."""
+        """Set up Adam optimizer, LR scheduler, and beta scheduler."""
         self.optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=self.config.learning_rate,
             weight_decay=self.config.weight_decay,
         )
 
+        total_steps = len(self.train_loader) * self.config.num_epochs
+
+        # LR scheduler
         if self.config.scheduler_type == "cosine":
-            total_steps = len(self.train_loader) * self.config.num_epochs
             self.scheduler = CosineAnnealingLR(
                 self.optimizer,
                 T_max=total_steps,
                 eta_min=self.config.learning_rate * 0.01,
             )
 
+        # Beta scheduler
+        if self.config.beta_schedule is not None:
+            # Update total_steps in config if not set
+            if self.config.beta_schedule.total_steps is None:
+                self.config.beta_schedule.total_steps = total_steps
+            self.beta_scheduler = Schedule(self.config.beta_schedule)
+        else:
+            # Constant beta
+            self.beta_scheduler = Schedule(self.config.beta)
+
     def _train_step(self, batch: Any) -> Dict[str, float]:
         """Execute single VAE training step."""
         data, ivar, mask = extract_batch_data(batch, self.device)
+
+        # Get current beta
+        current_beta = self._get_current_beta()
 
         # Forward pass
         reconstruction, mu, logvar = self.model(data)
@@ -64,7 +80,7 @@ class VAETrainer(BaseTrainer[VAETrainingConfig]):
             mu,
             logvar,
             reconstruction_loss_fn=self.config.reconstruction_loss_fn,
-            beta=self.config.beta,
+            beta=current_beta,
             ivar=ivar,
             mask=mask,
         )
@@ -84,6 +100,10 @@ class VAETrainer(BaseTrainer[VAETrainingConfig]):
         if self.scheduler is not None:
             self.scheduler.step()
 
+        # Advance beta scheduler
+        if self.beta_scheduler is not None:
+            self.beta_scheduler.step()
+
         self.global_step += 1
 
         return {
@@ -91,6 +111,7 @@ class VAETrainer(BaseTrainer[VAETrainingConfig]):
             "recon_loss": recon_loss.item(),
             "kl_loss": kl_loss.item(),
             "lr": self._get_current_lr(),
+            "beta": current_beta,
         }
 
     def _train_epoch(self) -> Dict[str, float]:
@@ -134,6 +155,7 @@ class VAETrainer(BaseTrainer[VAETrainingConfig]):
             return {}
 
         self.model.eval()
+        current_beta = self._get_current_beta()
         total_loss_sum = 0.0
         recon_loss_sum = 0.0
         kl_loss_sum = 0.0
@@ -149,7 +171,7 @@ class VAETrainer(BaseTrainer[VAETrainingConfig]):
                 mu,
                 logvar,
                 reconstruction_loss_fn=self.config.reconstruction_loss_fn,
-                beta=self.config.beta,
+                beta=current_beta,
                 ivar=ivar,
                 mask=mask,
             )
@@ -171,7 +193,12 @@ class VAETrainer(BaseTrainer[VAETrainingConfig]):
         print(f"Training on device: {self.device}")
         print(f"Number of epochs: {self.config.num_epochs}")
         print(f"Reconstruction loss: {self.config.reconstruction_loss_fn}")
-        print(f"Beta: {self.config.beta}")
+        beta_str = f"Beta: {self.config.beta}"
+        if self.config.beta_schedule is not None:
+            beta_str += (
+                f" (scheduled: {self.config.beta_schedule.schedule_type})"
+            )
+        print(beta_str)
         print(f"Gradient clipping: max_norm={self.config.max_grad_norm}")
         print("-" * 60)
 
@@ -182,15 +209,18 @@ class VAETrainer(BaseTrainer[VAETrainingConfig]):
         except RuntimeError:
             print("torch.compile() not available, skipping")
 
-
         start_epoch = self.current_epoch + 1
 
         for epoch in range(start_epoch, self.config.num_epochs + 1):
             self.current_epoch = epoch
-            print(
+            epoch_info = (
                 f"\nEpoch {epoch}/{self.config.num_epochs} "
-                f"(lr: {self._get_current_lr():.6f})"
+                f"(lr: {self._get_current_lr():.6f}"
             )
+            if self.config.beta_schedule is not None:
+                epoch_info += f", beta: {self._get_current_beta():.4f}"
+            epoch_info += ")"
+            print(epoch_info)
 
             # Train epoch
             train_metrics = self._train_epoch()

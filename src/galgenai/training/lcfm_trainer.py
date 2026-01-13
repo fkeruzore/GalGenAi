@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from ..models.lcfm import LCFM, count_parameters
 from .base_trainer import BaseTrainer
 from .config import LCFMTrainingConfig
+from .schedules import Schedule
 from .utils import extract_batch_data
 
 
@@ -42,12 +43,15 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         print("LCFM Model initialized:")
         print(f"  Trainable parameters: {num_params:,}")
         print(f"  Latent dimension: {config.latent_dim}")
-        print(f"  Beta (KL weight): {config.beta}")
+        beta_str = f"  Beta (KL weight): {config.beta}"
+        if config.beta_schedule is not None:
+            beta_str += f" (scheduled: {config.beta_schedule.schedule_type})"
+        print(beta_str)
         print(f"  Learning rate: {config.learning_rate}")
         print(f"  Total training steps: {config.num_steps:,}")
 
     def _setup_optimizer(self):
-        """Set up AdamW with warmup + cosine scheduler."""
+        """Set up AdamW with warmup + cosine and beta schedulers."""
         trainable_params = [
             p for p in self.model.parameters() if p.requires_grad
         ]
@@ -63,6 +67,15 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
             T_max=self.config.num_steps - self.config.warmup_steps,
             eta_min=self.config.learning_rate * 0.01,
         )
+
+        # Beta scheduler
+        if self.config.beta_schedule is not None:
+            if self.config.beta_schedule.total_steps is None:
+                self.config.beta_schedule.total_steps = self.config.num_steps
+            self.beta_scheduler = Schedule(self.config.beta_schedule)
+        else:
+            # Constant beta
+            self.beta_scheduler = Schedule(self.config.beta)
 
     def _get_lr_with_warmup(self) -> float:
         """Get current LR accounting for warmup."""
@@ -81,6 +94,10 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         """Execute single LCFM training step."""
         x, _, _ = extract_batch_data(batch, self.device)
 
+        # Update model's beta dynamically
+        current_beta = self._get_current_beta()
+        self.model.beta = current_beta
+
         # Compute loss using model method
         loss, loss_dict = self.model.compute_loss(x, return_components=True)
 
@@ -97,7 +114,12 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         if self.global_step >= self.config.warmup_steps:
             self.scheduler.step()
 
+        # Advance beta scheduler
+        if self.beta_scheduler is not None:
+            self.beta_scheduler.step()
+
         loss_dict["lr"] = current_lr
+        loss_dict["beta"] = current_beta
         return loss_dict
 
     @torch.no_grad()
@@ -184,19 +206,23 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
                     "kl_loss": running_kl_loss / log_steps,
                     "total_loss": running_total_loss / log_steps,
                     "lr": loss_dict["lr"],
+                    "beta": loss_dict["beta"],
                 }
 
                 elapsed = time.time() - start_time
                 steps_per_sec = self.config.log_every / elapsed
 
-                print(
+                log_str = (
                     f"Step {self.global_step:6d} | "
                     f"Loss: {avg_metrics['total_loss']:.4f} | "
                     f"Flow: {avg_metrics['flow_loss']:.4f} | "
                     f"KL: {avg_metrics['kl_loss']:.4f} | "
-                    f"LR: {avg_metrics['lr']:.2e} | "
-                    f"{steps_per_sec:.1f} steps/s"
+                    f"LR: {avg_metrics['lr']:.2e}"
                 )
+                if self.config.beta_schedule is not None:
+                    log_str += f" | Beta: {avg_metrics['beta']:.4f}"
+                log_str += f" | {steps_per_sec:.1f} steps/s"
+                print(log_str)
 
                 self._log_metrics(avg_metrics)
 

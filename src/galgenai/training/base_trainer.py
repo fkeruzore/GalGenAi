@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 
 from ..utils import get_device
 from .config import BaseTrainingConfig
+from .schedules import Schedule
 
 ConfigT = TypeVar("ConfigT", bound=BaseTrainingConfig)
 
@@ -59,9 +60,10 @@ class BaseTrainer(ABC, Generic[ConfigT]):
         self.best_loss = float("inf")
         self.loss_history: List[Dict[str, Any]] = []
 
-        # Optimizer and scheduler (set by subclass)
+        # Optimizer and schedulers (set by subclass)
         self.optimizer: Optional[torch.optim.Optimizer] = None
         self.scheduler: Optional[Any] = None
+        self.beta_scheduler: Optional[Schedule] = None
 
         # Setup optimizer
         self._setup_optimizer()
@@ -110,6 +112,13 @@ class BaseTrainer(ABC, Generic[ConfigT]):
             return 0.0
         return self.optimizer.param_groups[0]["lr"]
 
+    def _get_current_beta(self) -> float:
+        """Get current beta value from scheduler or config."""
+        if self.beta_scheduler is not None:
+            return self.beta_scheduler.get_value()
+        # Fall back to config.beta (subclass must have beta)
+        return getattr(self.config, "beta", 1.0)
+
     def save_checkpoint(
         self, path: Optional[str] = None, is_best: bool = False
     ):
@@ -128,6 +137,11 @@ class BaseTrainer(ABC, Generic[ConfigT]):
             ),
             "scheduler_state_dict": (
                 self.scheduler.state_dict() if self.scheduler else None
+            ),
+            "beta_scheduler_state_dict": (
+                self.beta_scheduler.state_dict()
+                if self.beta_scheduler
+                else None
             ),
             "config": self.config,
             "loss_history": self.loss_history,
@@ -157,6 +171,13 @@ class BaseTrainer(ABC, Generic[ConfigT]):
             "scheduler_state_dict"
         ):
             self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
+        if self.beta_scheduler is not None and checkpoint.get(
+            "beta_scheduler_state_dict"
+        ):
+            self.beta_scheduler.load_state_dict(
+                checkpoint["beta_scheduler_state_dict"]
+            )
 
         self.global_step = checkpoint.get("global_step", 0)
         self.current_epoch = checkpoint.get("current_epoch", 0)
