@@ -6,7 +6,6 @@ from typing import Any, Dict, Optional, Tuple
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 
 from ..models.lcfm import LCFM, count_parameters
@@ -47,7 +46,7 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         print(f"  Total training steps: {config.num_steps:,}")
 
     def _setup_optimizer(self):
-        """Set up AdamW with warmup + cosine scheduler."""
+        """Set up AdamW with optional scheduler."""
         trainable_params = [
             p for p in self.model.parameters() if p.requires_grad
         ]
@@ -58,11 +57,8 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
             betas=(0.9, 0.999),
         )
 
-        self.scheduler = CosineAnnealingLR(
-            self.optimizer,
-            T_max=self.config.num_steps - self.config.warmup_steps,
-            eta_min=self.config.learning_rate * 0.01,
-        )
+        if self.config.scheduler_factory is not None:
+            self.scheduler = self.config.scheduler_factory(self.optimizer)
 
     def _get_lr_with_warmup(self) -> float:
         """Get current LR accounting for warmup."""
@@ -70,7 +66,9 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
             return self.config.learning_rate * (
                 self.global_step / self.config.warmup_steps
             )
-        return self.scheduler.get_last_lr()[0]
+        if self.scheduler is not None:
+            return self.scheduler.get_last_lr()[0]
+        return self.config.learning_rate
 
     def _set_lr(self, lr: float):
         """Set learning rate for all parameter groups."""
@@ -94,7 +92,10 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         current_lr = self._get_lr_with_warmup()
         self._set_lr(current_lr)
 
-        if self.global_step >= self.config.warmup_steps:
+        if (
+            self.scheduler is not None
+            and self.global_step >= self.config.warmup_steps
+        ):
             self.scheduler.step()
 
         loss_dict["lr"] = current_lr

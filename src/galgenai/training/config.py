@@ -1,7 +1,7 @@
 """Training configuration dataclasses."""
 
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 
 
 @dataclass
@@ -12,6 +12,9 @@ class BaseTrainingConfig:
     learning_rate: float = 1e-3
     weight_decay: float = 0.0
     max_grad_norm: float = 1.0
+
+    # Scheduler (callable that takes optimizer and returns scheduler)
+    scheduler_factory: Optional[Callable[[Any], Any]] = None
 
     # Logging & checkpointing
     log_every: int = 100
@@ -38,9 +41,6 @@ class VAETrainingConfig(BaseTrainingConfig):
 
     # Validation
     validate_every: int = 1
-
-    # Scheduler
-    scheduler_type: Optional[str] = None
 
     # Override defaults for epoch-based training
     log_every: int = 1

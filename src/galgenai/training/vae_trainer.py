@@ -5,7 +5,6 @@ from typing import Any, Dict, Optional
 
 import torch
 import torch.nn as nn
-from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -42,13 +41,8 @@ class VAETrainer(BaseTrainer[VAETrainingConfig]):
             weight_decay=self.config.weight_decay,
         )
 
-        if self.config.scheduler_type == "cosine":
-            total_steps = len(self.train_loader) * self.config.num_epochs
-            self.scheduler = CosineAnnealingLR(
-                self.optimizer,
-                T_max=total_steps,
-                eta_min=self.config.learning_rate * 0.01,
-            )
+        if self.config.scheduler_factory is not None:
+            self.scheduler = self.config.scheduler_factory(self.optimizer)
 
     def _train_step(self, batch: Any) -> Dict[str, float]:
         """Execute single VAE training step."""
