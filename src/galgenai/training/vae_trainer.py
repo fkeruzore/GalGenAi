@@ -215,7 +215,7 @@ class VAETrainer(BaseTrainer[VAETrainingConfig]):
             self.current_epoch = epoch
             epoch_info = (
                 f"\nEpoch {epoch}/{self.config.num_epochs} "
-                f"(lr: {self._get_current_lr():.6f}"
+                f"(lr: {self._get_current_lr():.3e}"
             )
             if self.config.beta_schedule is not None:
                 epoch_info += f", beta: {self._get_current_beta():.4f}"

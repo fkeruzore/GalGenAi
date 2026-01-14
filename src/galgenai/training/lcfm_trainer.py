@@ -214,10 +214,10 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
 
                 log_str = (
                     f"Step {self.global_step:6d} | "
-                    f"Loss: {avg_metrics['total_loss']:.4f} | "
-                    f"Flow: {avg_metrics['flow_loss']:.4f} | "
-                    f"KL: {avg_metrics['kl_loss']:.4f} | "
-                    f"LR: {avg_metrics['lr']:.2e}"
+                    f"Loss: {avg_metrics['total_loss']:.3e} | "
+                    f"Flow: {avg_metrics['flow_loss']:.3e} | "
+                    f"KL: {avg_metrics['kl_loss']:.3e} | "
+                    f"LR: {avg_metrics['lr']:.3e}"
                 )
                 if self.config.beta_schedule is not None:
                     log_str += f" | Beta: {avg_metrics['beta']:.4f}"
@@ -261,8 +261,8 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
                 if val_metrics:
                     print(
                         f"Validation - "
-                        f"Flow: {val_metrics['val_flow_loss']:.4f}, "
-                        f"KL: {val_metrics['val_kl_loss']:.4f}"
+                        f"Flow: {val_metrics['val_flow_loss']:.3e}, "
+                        f"KL: {val_metrics['val_kl_loss']:.3e}"
                     )
 
             # Checkpointing
