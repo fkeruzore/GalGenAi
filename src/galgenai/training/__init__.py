@@ -3,7 +3,6 @@
 from .base_trainer import BaseTrainer
 from .config import BaseTrainingConfig, LCFMTrainingConfig, VAETrainingConfig
 from .lcfm_trainer import LCFMTrainer, create_lcfm_trainer
-from .schedules import Schedule, ScheduleConfig, ScheduleType
 from .utils import extract_batch_data, vae_loss
 from .vae_trainer import VAETrainer
 
@@ -12,10 +11,6 @@ __all__ = [
     "BaseTrainingConfig",
     "VAETrainingConfig",
     "LCFMTrainingConfig",
-    # Schedules
-    "Schedule",
-    "ScheduleConfig",
-    "ScheduleType",
     # Trainers
     "BaseTrainer",
     "VAETrainer",
