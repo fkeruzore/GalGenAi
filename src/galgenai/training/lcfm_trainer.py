@@ -3,10 +3,9 @@
 from typing import Any, Dict, Optional, Tuple
 
 import torch
-from tqdm import tqdm
-import torch.nn as nn
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from ..models.lcfm import LCFM, count_parameters
 from .base_trainer import BaseTrainer
@@ -40,7 +39,6 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         num_params = count_parameters(model)
         print("LCFM Model initialized:")
         print(f"  Trainable parameters: {num_params:,}")
-        print(f"  Latent dimension: {config.latent_dim}")
         print(f"  Beta (KL weight): {config.beta}")
         print(f"  Learning rate: {config.learning_rate}")
         print(f"  Total training steps: {config.num_steps:,}")
@@ -250,64 +248,3 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         print("\nTraining complete!")
         final_loss = running_total_loss / max(log_steps, 1)
         self.save_checkpoint(is_best=(final_loss <= self.best_loss))
-
-
-def create_lcfm_trainer(
-    vae_encoder: nn.Module,
-    train_dataset: torch.utils.data.Dataset,
-    val_dataset: Optional[torch.utils.data.Dataset] = None,
-    config: Optional[LCFMTrainingConfig] = None,
-) -> LCFMTrainer:
-    """
-    Factory function to create LCFM model and trainer.
-
-    Args:
-        vae_encoder: Trained VAE encoder module.
-        train_dataset: Training dataset.
-        val_dataset: Optional validation dataset.
-        config: Training configuration.
-
-    Returns:
-        LCFMTrainer ready to call .train()
-    """
-    if config is None:
-        config = LCFMTrainingConfig()
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config.batch_size,
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True,
-        drop_last=True,
-    )
-
-    val_loader = None
-    if val_dataset is not None:
-        val_loader = DataLoader(
-            val_dataset,
-            batch_size=config.batch_size,
-            shuffle=False,
-            num_workers=4,
-            pin_memory=True,
-        )
-
-    model = LCFM(
-        vae_encoder=vae_encoder,
-        latent_dim=config.latent_dim,
-        in_channels=config.in_channels,
-        base_channels=config.base_channels,
-        beta=config.beta,
-        channel_mult=config.channel_mult,
-        num_res_blocks=config.num_res_blocks,
-        attention_resolutions=config.attention_resolutions,
-        dropout=config.dropout,
-        num_heads=config.num_heads,
-    )
-
-    return LCFMTrainer(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        config=config,
-    )

@@ -62,7 +62,7 @@ dataset, train_loader, val_loader = get_dataset_and_loaders(
     dataset_raw,
     nx=64,  # Crop size (64x64 pixels)
     batch_size=32,  # Batch size for training
-    num_workers=0
+    num_workers=0,
 )
 print(f"Dataset size: {len(dataset)} samples")
 print(f"Train batches: {len(train_loader)}, Val batches: {len(val_loader)}")
@@ -169,22 +169,18 @@ print(f"LCFM parameters: {sum(p.numel() for p in lcfm.parameters()):,}")
 print("  (encoder frozen, only flow network is trained)")
 
 # Configure LCFM training
-# - num_steps=5000: step-based training (not epochs)
+# - num_steps=500: step-based training (not epochs)
 # - learning_rate=2e-4: standard for flow matching
-# - warmup_steps=500: linear LR warmup
-# - sample_every=2500: generate samples periodically
+# - warmup_steps=50: linear LR warmup
+# - sample_every=250: generate samples periodically
 lcfm_config = LCFMTrainingConfig(
-    latent_dim=32,
-    in_channels=5,
-    base_channels=64,
     num_steps=500,
-    batch_size=32,
     learning_rate=2e-4,
     warmup_steps=50,
     beta=0.001,
-    sample_every=250,  # Generate samples every 2500 steps
-    save_every=500,  # Save checkpoint at the end
-    log_every=50,  # Log every 100 steps
+    sample_every=250,
+    save_every=500,
+    log_every=50,
     output_dir=str(output_dir / "lcfm"),
     device=str(device),
 )

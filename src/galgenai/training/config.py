@@ -1,7 +1,7 @@
 """Training configuration dataclasses."""
 
-from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, Optional
 
 
 @dataclass
@@ -51,23 +51,12 @@ class VAETrainingConfig(BaseTrainingConfig):
 class LCFMTrainingConfig(BaseTrainingConfig):
     """LCFM-specific training configuration."""
 
-    # Model architecture
-    latent_dim: int = 32
-    in_channels: int = 5
-    base_channels: int = 64
-    channel_mult: Tuple[int, ...] = field(default=(1, 2, 4, 4))
-    num_res_blocks: int = 2
-    attention_resolutions: Tuple[int, ...] = field(default=(16, 8))
-    dropout: float = 0.1
-    num_heads: int = 4
-
     # LCFM-specific loss
     beta: float = 0.001
 
     # Step-based training
     num_steps: int = 100_000
     warmup_steps: int = 1000
-    batch_size: int = 128
 
     # Sampling during training
     sample_every: int = 5000
