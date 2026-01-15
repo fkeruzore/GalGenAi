@@ -1,9 +1,9 @@
 """LCFM trainer implementation."""
 
-import time
 from typing import Any, Dict, Optional, Tuple
 
 import torch
+from tqdm import tqdm
 import torch.nn as nn
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
@@ -143,7 +143,6 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         """Main step-based training loop."""
         print(f"\nStarting training from step {self.global_step}")
         print(f"Training for {self.config.num_steps - self.global_step} steps")
-        print("-" * 60)
 
         self.model.train()
         try:
@@ -165,7 +164,13 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         running_total_loss = 0.0
         log_steps = 0
 
-        start_time = time.time()
+        # Progress bar spanning all steps
+        pbar = tqdm(
+            total=self.config.num_steps,
+            initial=self.global_step,
+            desc="Training",
+            unit="step",
+        )
 
         while self.global_step < self.config.num_steps:
             batch = next(data_iter)
@@ -177,8 +182,19 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
             log_steps += 1
 
             self.global_step += 1
+            pbar.update(1)
 
-            # Logging
+            # Update progress bar postfix with current metrics
+            pbar.set_postfix(
+                {
+                    "loss": f"{loss_dict['total_loss']:.3e}",
+                    "flow": f"{loss_dict['flow_loss']:.3e}",
+                    "kl": f"{loss_dict['kl_loss']:.3e}",
+                    "lr": f"{loss_dict['lr']:.3e}",
+                }
+            )
+
+            # Periodic logging (for metrics tracking, not display)
             if self.global_step % self.config.log_every == 0:
                 avg_metrics = {
                     "flow_loss": running_flow_loss / log_steps,
@@ -186,18 +202,6 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
                     "total_loss": running_total_loss / log_steps,
                     "lr": loss_dict["lr"],
                 }
-
-                elapsed = time.time() - start_time
-                steps_per_sec = self.config.log_every / elapsed
-
-                print(
-                    f"Step {self.global_step:6d} | "
-                    f"Loss: {avg_metrics['total_loss']:.3e} | "
-                    f"Flow: {avg_metrics['flow_loss']:.3e} | "
-                    f"KL: {avg_metrics['kl_loss']:.3e} | "
-                    f"LR: {avg_metrics['lr']:.3e} | "
-                    f"{steps_per_sec:.1f} steps/s"
-                )
 
                 self._log_metrics(avg_metrics)
 
@@ -209,11 +213,10 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
                 running_kl_loss = 0.0
                 running_total_loss = 0.0
                 log_steps = 0
-                start_time = time.time()
 
             # Sample generation
             if self.global_step % self.config.sample_every == 0:
-                print(f"Generating samples at step {self.global_step}...")
+                pbar.write(f"Generating samples at step {self.global_step}...")
                 samples, conditioning = self.generate_samples(
                     self.config.num_sample_images
                 )
@@ -234,9 +237,8 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
                 # Validation
                 val_metrics = self.validate()
                 if val_metrics:
-                    print(
-                        f"Validation - "
-                        f"Flow: {val_metrics['val_flow_loss']:.3e}, "
+                    pbar.write(
+                        f"  Val - Flow: {val_metrics['val_flow_loss']:.3e}, "
                         f"KL: {val_metrics['val_kl_loss']:.3e}"
                     )
 
@@ -244,6 +246,7 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
             if self.global_step % self.config.save_every == 0:
                 self.save_checkpoint()
 
+        pbar.close()
         print("\nTraining complete!")
         final_loss = running_total_loss / max(log_steps, 1)
         self.save_checkpoint(is_best=(final_loss <= self.best_loss))
