@@ -1,6 +1,6 @@
 [project]
 name = "galgenai"
-version = "0.1.0"
+version = "0.2.0"
 description = "Add your description here"
 readme = "README.md"
 authors = [
@@ -12,6 +12,7 @@ dependencies = [
     "matplotlib>=3.10.7",
     "numpy>=2.3.4",
     "torch>=2.9.0",
+    "torchdiffeq>=0.2.5",
     "torchvision>=0.24.0",
     "tqdm>=4.67.1",
 ]
@@ -42,7 +43,11 @@ investigate = [
 line-length = 79
 
 [tool.ruff.lint]
-select = ["E", "F", "B"]
+select = ["E", "F", "B", "W"]
+
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 72  # For docstrings and comments
 
 [tool.ruff.format]
 docstring-code-format = true
+

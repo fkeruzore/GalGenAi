@@ -6,19 +6,46 @@ from typing import Tuple, List, Optional
 
 from .layers import DownsampleBlock, UpsampleBlock
 
+# Default channel progression for the VAE architecture
+_DEFAULT_CHANNEL_DEPTHS = [16, 32, 64, 128, 256, 512, 512]
+
+
+def _get_num_stages(input_size: int) -> int:
+    """
+    Determine number of stages based on input size.
+
+    This prevents spatial dimensions from becoming too small during
+    downsampling (which would cause BatchNorm errors with size 1x1).
+
+    Args:
+        input_size: Spatial size of input images (assumes square).
+
+    Returns:
+        Number of stages (channel depth levels) to use.
+    """
+    if input_size >= 128:
+        return 7
+    elif input_size >= 64:
+        return 6
+    else:
+        return 5
+
 
 class VAEEncoder(nn.Module):
     """
-    VAE Encoder with configurable stages of downsampling using ResNet blocks.
+    VAE Encoder with configurable stages of downsampling using ResNet
+    blocks.
 
     Args:
         in_channels: Number of input channels (e.g., 1 for grayscale).
         latent_dim: Dimension of the latent space.
-        input_size: Spatial size of input images (assumes square images).
-        channel_depths: List of channel depths for each downsampling stage.
+        input_size: Spatial size of input images (assumes square
+            images).
+        channel_depths: List of channel depths for each downsampling
+            stage.
         logvar_clamp: Tuple (min, max) to clamp logvar for numerical
-            stability. Prevents overflow in exp() during reparameterization.
-            Default: (-30.0, 20.0).
+            stability. Prevents overflow in exp() during
+            reparameterization. Default: (-30.0, 20.0).
     """
 
     def __init__(
@@ -31,7 +58,9 @@ class VAEEncoder(nn.Module):
     ):
         super().__init__()
         if channel_depths is None:
-            channel_depths = [16, 32, 64, 128, 256, 512, 512]
+            num_stages = _get_num_stages(input_size)
+            channel_depths = _DEFAULT_CHANNEL_DEPTHS[:num_stages]
+
         self.latent_dim = latent_dim
         self.input_size = input_size
         self.logvar_clamp = logvar_clamp
@@ -48,11 +77,16 @@ class VAEEncoder(nn.Module):
                 DownsampleBlock(channel_depths[i], channel_depths[i + 1])
             )
 
-        # Calculate flattened size dynamically
-        with torch.no_grad():
-            dummy_input = torch.zeros(1, in_channels, input_size, input_size)
-            dummy_output = self.forward_conv(dummy_input)
-            self.flatten_size = dummy_output.view(-1).shape[0]
+        # Analytic flattened size (no dummy forward/BatchNorm side
+        # effects)
+        num_downsamples = len(channel_depths) - 1
+        spatial = input_size // (2**num_downsamples)
+        if spatial < 1:
+            raise ValueError(
+                f"Input size {input_size} too small for {num_downsamples} "
+                "downsampling stages."
+            )
+        self.flatten_size = channel_depths[-1] * spatial * spatial
 
         # Dense layers for mean and log variance
         self.fc_mu = nn.Linear(self.flatten_size, latent_dim)
@@ -70,7 +104,8 @@ class VAEEncoder(nn.Module):
         Forward pass through encoder.
 
         Args:
-            x: Input tensor of shape (batch_size, in_channels, height, width).
+            x: Input tensor of shape (batch_size, in_channels, height,
+                width).
 
         Returns:
             Tuple of (mu, log_var) for the latent distribution.
@@ -110,24 +145,23 @@ class VAEDecoder(nn.Module):
     ):
         super().__init__()
         if channel_depths is None:
-            channel_depths = [512, 512, 256, 128, 64, 32, 16]
+            num_stages = _get_num_stages(input_size)
+            channel_depths = _DEFAULT_CHANNEL_DEPTHS[:num_stages][::-1]
+
         self.latent_dim = latent_dim
         self.input_size = input_size
         self.channel_depths = channel_depths
 
-        # Calculate initial spatial size needed to match the encoder's output
-        # This is done by creating a dummy encoder and getting its output shape
-        dummy_encoder = VAEEncoder(
-            in_channels=out_channels,
-            latent_dim=latent_dim,
-            input_size=input_size,
-            channel_depths=[d for d in reversed(channel_depths)],
-        )
-        with torch.no_grad():
-            dummy_input = torch.zeros(1, out_channels, input_size, input_size)
-            dummy_output = dummy_encoder.forward_conv(dummy_input)
-            self.unflatten_size = dummy_output.shape[2:]
-            self.flatten_size = dummy_output.view(-1).shape[0]
+        # Analytic unflatten size (mirror of encoder downsampling)
+        num_upsamples = len(channel_depths) - 1
+        spatial = input_size // (2**num_upsamples)
+        if spatial < 1:
+            raise ValueError(
+                f"Input size {input_size} too small for {num_upsamples} "
+                "upsampling stages."
+            )
+        self.unflatten_size = (spatial, spatial)
+        self.flatten_size = channel_depths[0] * spatial * spatial
 
         # Dense layer to expand from latent space
         self.fc = nn.Linear(latent_dim, self.flatten_size)
@@ -155,7 +189,8 @@ class VAEDecoder(nn.Module):
             z: Latent vector of shape (batch_size, latent_dim).
 
         Returns:
-            Reconstructed image of shape (batch_size, out_channels, h, w).
+            Reconstructed image of shape (batch_size, out_channels, h,
+                w).
         """
         x = self.fc(z)
         x = x.view(-1, self.channel_depths[0], *self.unflatten_size)
@@ -185,11 +220,11 @@ class VAE(nn.Module):
         in_channels: Number of input channels.
         latent_dim: Dimension of the latent space.
         input_size: Spatial size of input images (assumes square).
-        channel_depths: List of channel depths for the encoder. The decoder
-            will use the reverse.
+        channel_depths: List of channel depths for the encoder. The
+            decoder will use the reverse.
         logvar_clamp: Tuple (min, max) to clamp logvar in encoder for
-            numerical stability. Prevents overflow during reparameterization.
-            Default: (-30.0, 20.0).
+            numerical stability. Prevents overflow during
+            reparameterization. Default: (-30.0, 20.0).
     """
 
     def __init__(
@@ -202,20 +237,10 @@ class VAE(nn.Module):
     ):
         super().__init__()
         if channel_depths is None:
-            channel_depths = [16, 32, 64, 128, 256, 512, 512]
+            channel_depths = _DEFAULT_CHANNEL_DEPTHS
 
-        # Determine number of stages based on input size to prevent spatial
-        # dimensions from becoming 1x1 too early, which can cause
-        # BatchNorm errors.
-        if input_size >= 128:
-            num_stages = 7
-        elif input_size >= 64:
-            num_stages = 6
-        else:
-            num_stages = 5
-
-        # Adjust channel_depths based on the determined number of stages
-        # The default channel_depths has 7 stages, so we slice it accordingly.
+        # Adjust channel_depths based on input size
+        num_stages = _get_num_stages(input_size)
         adjusted_channel_depths = channel_depths[:num_stages]
 
         self.encoder = VAEEncoder(
@@ -256,7 +281,8 @@ class VAE(nn.Module):
         Forward pass through the VAE.
 
         Args:
-            x: Input tensor of shape (batch_size, in_channels, height, width).
+            x: Input tensor of shape (batch_size, in_channels, height,
+                width).
 
         Returns:
             Tuple of (reconstruction, mu, logvar).

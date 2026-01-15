@@ -7,8 +7,9 @@ import torch
 from torch.utils.data import DataLoader, random_split
 from datasets import load_from_disk
 
-from galgenai import VAE, get_device, get_device_name
-from galgenai.training import train, vae_loss
+from galgenai.utils import get_device, get_device_name
+from galgenai.models import VAE
+from galgenai.training import VAETrainer, VAETrainingConfig, vae_loss
 
 
 device = get_device()
@@ -118,9 +119,11 @@ def mini_train(
     num_workers=8,
     seed=42,
 ):
+    n_pixels = batch_size * dataset.n_bands * dataset.nx**2
+    n_nits = batch_size * model.encoder.latent_dim
     print(
-        f"BATCH DIMENSION: {batch_size * dataset.n_bands * dataset.nx**2:.2e};",
-        f"# NITS: {batch_size * model.encoder.latent_dim:.2e}",
+        f"BATCH DIMENSION: {n_pixels:.2e};",
+        f"# NITS: {n_nits:.2e}",
     )
 
     torch.random.manual_seed(seed)
@@ -134,12 +137,6 @@ def mini_train(
         batch_size=batch_size,
         num_workers=num_workers,
         shuffle=True,
-    )
-    test_loader = DataLoader(
-        dataset_test,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        shuffle=False,
     )
 
     # Get first batch for sanity check
@@ -162,16 +159,17 @@ def mini_train(
         )
 
     # Warm up
-    train(
-        model=model,
-        train_loader=train_loader,
-        optimizer=torch.optim.Adam(model.parameters(), lr=lr),
-        device=device,
+    config = VAETrainingConfig(
         num_epochs=num_epochs,
+        learning_rate=lr,
         reconstruction_loss_fn="masked_weighted_mse",
         beta=1.0,
         max_grad_norm=2.0,
+        output_dir="./test_vae_output",
+        save_every=1000,  # Don't save checkpoints during test
     )
+    trainer = VAETrainer(model=model, train_loader=train_loader, config=config)
+    trainer.train()
 
     # Compute final loss after training
     model.eval()
