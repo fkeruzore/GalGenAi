@@ -5,8 +5,7 @@ Based on Samaddar et al. (2025) "Efficient Flow Matching using Latent
 Variables"
 
 Architecture:
-- Frozen VAE encoder extracts features from images
-- Trainable stochastic layer outputs latent distribution q(f|x)
+- VAE encoder with frozen backbone, trainable fc_mu/fc_logvar layers
 - U-Net predicts velocity field v(x_t, f, t) for flow matching
 - Flow transports noise x_0 ~ N(0,I) to data x_1 conditioned on latent f
 """
@@ -21,17 +20,18 @@ from typing import Tuple
 
 class ResBlock(nn.Module):
     """
-    Residual block with time/latent conditioning via adaptive group
-    normalization.
+    Residual block with time conditioning via adaptive group norm.
 
-    The conditioning signal (time + latent embedding) modulates the
-    features through scale and shift parameters after group
-    normalization. This is the standard approach in diffusion/flow
-    models (e.g., ADM, DiT).
+    The time embedding modulates the features through scale and shift
+    parameters after group normalization. This is the standard approach
+    in diffusion/flow models (e.g., ADM, DiT).
+
+    Note: Following Samaddar et al., latent conditioning is applied via
+    linear projection to the final output, not through AdaGN.
 
     Architecture:
-        x -> GroupNorm -> scale/shift by cond -> SiLU -> Conv
-          -> GroupNorm -> scale/shift by cond -> SiLU -> Dropout
+        x -> GroupNorm -> scale/shift by time -> SiLU -> Conv
+          -> GroupNorm -> scale/shift by time -> SiLU -> Dropout
           -> Conv -> + x
     """
 
@@ -58,9 +58,11 @@ class ResBlock(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
         # Conditioning: project to scale and shift for both norms
-        # Output: 4 * out_channels (scale1, shift1, scale2, shift2)
+        # First norm uses in_channels, second uses out_channels
+        # Output: 2*in_ch (scale1, shift1) + 2*out_ch (scale2, shift2)
         self.cond_proj = nn.Sequential(
-            nn.SiLU(), nn.Linear(cond_dim, out_channels * 4)
+            nn.SiLU(),
+            nn.Linear(cond_dim, in_channels * 2 + out_channels * 2),
         )
 
         # Skip connection (identity if channels match, else 1x1 conv)
@@ -73,13 +75,18 @@ class ResBlock(nn.Module):
         """
         Args:
             x: (batch, in_channels, H, W) input features
-            cond: (batch, cond_dim) conditioning vector (time + latent)
+            cond: (batch, cond_dim) time conditioning vector
         Returns:
             (batch, out_channels, H, W) output features
         """
         # Get conditioning parameters
-        cond_params = self.cond_proj(cond)  # (batch, out_channels * 4)
-        scale1, shift1, scale2, shift2 = cond_params.chunk(4, dim=1)
+        # Split: 2*in_ch for norm1, 2*out_ch for norm2
+        cond_params = self.cond_proj(cond)
+        params1, params2 = cond_params.split(
+            [self.in_channels * 2, self.out_channels * 2], dim=1
+        )
+        scale1, shift1 = params1.chunk(2, dim=1)
+        scale2, shift2 = params2.chunk(2, dim=1)
 
         # Reshape: (batch, channels) -> (batch, channels, 1, 1)
         scale1 = scale1[:, :, None, None]
@@ -88,19 +95,13 @@ class ResBlock(nn.Module):
         shift2 = shift2[:, :, None, None]
 
         # First block with adaptive normalization
+        # Order: norm → scale/shift → activation → conv (standard AdaGN)
         h = self.norm1(x)
-        # For first norm, we need to handle channel mismatch
-        if self.in_channels != self.out_channels:
-            # Project x first, then apply scale/shift
-            h = F.silu(h)
-            h = self.conv1(h)
-            h = h * (1 + scale1) + shift1
-        else:
-            h = h * (1 + scale1) + shift1
-            h = F.silu(h)
-            h = self.conv1(h)
+        h = h * (1 + scale1) + shift1
+        h = F.silu(h)
+        h = self.conv1(h)
 
-        # Second block
+        # Second block (same ordering)
         h = self.norm2(h)
         h = h * (1 + scale2) + shift2
         h = F.silu(h)
@@ -123,6 +124,12 @@ class AttentionBlock(nn.Module):
     def __init__(self, channels: int, num_heads: int = 4, num_groups: int = 8):
         super().__init__()
 
+        if channels % num_heads != 0:
+            raise ValueError(
+                f"channels={channels} must be divisible by "
+                f"num_heads={num_heads}"
+            )
+
         self.num_heads = num_heads
         self.head_dim = channels // num_heads
         self.scale = self.head_dim**-0.5
@@ -131,13 +138,17 @@ class AttentionBlock(nn.Module):
         self.qkv = nn.Conv2d(channels, channels * 3, 1)
         self.proj = nn.Conv2d(channels, channels, 1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, cond: torch.Tensor = None
+    ) -> torch.Tensor:
         """
         Args:
             x: (batch, channels, H, W)
+            cond: ignored, for interface compatibility with ResBlock
         Returns:
             (batch, channels, H, W)
         """
+        del cond  # Unused, for interface compatibility
         B, C, H, W = x.shape
 
         h = self.norm(x)
@@ -177,8 +188,8 @@ class VelocityUNet(nn.Module):
     - Middle: self-attention at lowest resolution
     - Decoder: progressively upsamples with skip connections from
       encoder
-    - Conditioning: time and latent embeddings added and injected via
-      AdaGN
+    - Conditioning: time embedding injected via AdaGN, latent embedding
+      added to final output via linear projection (following paper)
 
     Hyperparameter choices (following Samaddar et al. for scientific
     data):
@@ -194,6 +205,7 @@ class VelocityUNet(nn.Module):
         self,
         in_channels: int = 5,
         latent_dim: int = 32,
+        input_size: int = 64,
         base_channels: int = 64,
         channel_mult: Tuple[int, ...] = (1, 2, 4, 4),
         num_res_blocks: int = 2,
@@ -204,7 +216,17 @@ class VelocityUNet(nn.Module):
         super().__init__()
 
         self.in_channels = in_channels
+        self.input_size = input_size
         self.base_channels = base_channels
+
+        # Validate input_size is divisible by downsampling factor
+        num_downsamples = len(channel_mult) - 1
+        downsample_factor = 2**num_downsamples
+        if input_size % downsample_factor != 0:
+            raise ValueError(
+                f"input_size={input_size} must be divisible by "
+                f"{downsample_factor} for {num_downsamples} downsample stages"
+            )
 
         # Compute channel counts at each level
         channels = [base_channels * m for m in channel_mult]
@@ -217,14 +239,11 @@ class VelocityUNet(nn.Module):
             nn.Linear(time_dim, time_dim),
         )
 
-        # Latent embedding: project to same dimension as time
-        self.latent_mlp = nn.Sequential(
-            nn.Linear(latent_dim, time_dim),
-            nn.SiLU(),
-            nn.Linear(time_dim, time_dim),
-        )
+        # Latent projection: linear projection to output channels
+        # Following Samaddar et al., latent is added to final output
+        self.latent_proj = nn.Linear(latent_dim, in_channels)
 
-        # Combined conditioning dimension
+        # Conditioning dimension for AdaGN (time only)
         cond_dim = time_dim
 
         # Initial convolution
@@ -234,7 +253,7 @@ class VelocityUNet(nn.Module):
         self.encoder_blocks = nn.ModuleList()
         self.downsamplers = nn.ModuleList()
 
-        current_res = 64  # Starting resolution
+        current_res = input_size  # Starting resolution
         prev_channels = base_channels
 
         for level, ch in enumerate(channels):
@@ -346,19 +365,23 @@ class VelocityUNet(nn.Module):
         Predict velocity field at time t.
 
         Args:
-            x: (batch, in_channels, 64, 64) noisy image x_t
+            x: (batch, in_channels, H, W) noisy image x_t
             f: (batch, latent_dim) latent features
             t: (batch,) time values in [0, 1]
 
         Returns:
-            (batch, in_channels, 64, 64) predicted velocity
+            (batch, in_channels, H, W) predicted velocity
         """
-        # Compute conditioning: time + latent embeddings (added
-        # together)
+        # Validate input size matches expected size
+        if x.shape[2] != self.input_size or x.shape[3] != self.input_size:
+            raise ValueError(
+                f"Expected input size {self.input_size}x{self.input_size}, "
+                f"got {x.shape[2]}x{x.shape[3]}"
+            )
+
+        # Time conditioning only (latent added at output per paper)
         t_emb = self._sinusoidal_embedding(t, self.base_channels)
-        t_emb = self.time_mlp(t_emb)
-        f_emb = self.latent_mlp(f)
-        cond = t_emb + f_emb  # Simple addition, as in Samaddar et al.
+        cond = self.time_mlp(t_emb)
 
         # Initial conv
         h = self.conv_in(x)
@@ -369,19 +392,13 @@ class VelocityUNet(nn.Module):
             self.encoder_blocks, self.downsamplers, strict=True
         ):
             for block in level_blocks:
-                if isinstance(block, ResBlock):
-                    h = block(h, cond)
-                else:
-                    h = block(h)
+                h = block(h, cond)
             skips.append(h)
             h = downsample(h)
 
         # Middle
         for block in self.middle:
-            if isinstance(block, ResBlock):
-                h = block(h, cond)
-            else:
-                h = block(h)
+            h = block(h, cond)
 
         # Decoder with skip connections
         for level_blocks, upsample in zip(
@@ -392,91 +409,16 @@ class VelocityUNet(nn.Module):
             h = torch.cat([h, skip], dim=1)
 
             for block in level_blocks:
-                if isinstance(block, ResBlock):
-                    h = block(h, cond)
-                else:
-                    h = block(h)
+                h = block(h, cond)
 
             if not isinstance(upsample, nn.Identity):
                 h = F.interpolate(h, scale_factor=2, mode="nearest")
                 h = upsample(h)
 
-        return self.conv_out(h)
-
-
-# =====================================================================
-# Latent Stochastic Layer
-# =====================================================================
-
-
-class LatentStochasticLayer(nn.Module):
-    """
-    Trainable stochastic layer on top of frozen VAE encoder.
-
-    Takes the (μ, logvar) from the frozen encoder and learns to refine
-    them for the flow matching task. This is a key component from
-    Samaddar et al.: rather than using the encoder's latent directly, we
-    add a learnable layer that can adapt the latent distribution
-    specifically for conditioning the flow.
-
-    The KL divergence term in training encourages this distribution to
-    stay close to N(0, I), which regularizes the latent space.
-    """
-
-    def __init__(self, latent_dim: int = 32, hidden_dim: int = 64):
-        super().__init__()
-
-        self.latent_dim = latent_dim
-
-        # Refine μ and logvar from encoder
-        # Input: concatenation of μ and logvar (2 * latent_dim)
-        self.refine = nn.Sequential(
-            nn.Linear(latent_dim * 2, hidden_dim),
-            nn.SiLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.SiLU(),
-        )
-
-        self.mu_head = nn.Linear(hidden_dim, latent_dim)
-        self.logvar_head = nn.Linear(hidden_dim, latent_dim)
-
-        # Initialize to approximately identity mapping
-        nn.init.zeros_(self.mu_head.weight)
-        nn.init.zeros_(self.mu_head.bias)
-        nn.init.zeros_(self.logvar_head.weight)
-        nn.init.zeros_(self.logvar_head.bias)
-
-    def forward(
-        self, mu_enc: torch.Tensor, logvar_enc: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Args:
-            mu_enc: (batch, latent_dim) mean from frozen encoder
-            logvar_enc: (batch, latent_dim) log-variance from frozen
-                encoder
-
-        Returns:
-            f: (batch, latent_dim) sampled latent (reparameterized)
-            mu: (batch, latent_dim) refined mean
-            logvar: (batch, latent_dim) refined log-variance
-        """
-        # Concatenate encoder outputs
-        h = torch.cat([mu_enc, logvar_enc], dim=-1)
-        h = self.refine(h)
-
-        # Predict refined parameters (as residuals to encoder output)
-        mu = mu_enc + self.mu_head(h)
-        logvar = logvar_enc + self.logvar_head(h)
-
-        # Clamp logvar for numerical stability
-        logvar = torch.clamp(logvar, min=-10, max=10)
-
-        # Reparameterization trick: f = μ + σ * ε, where ε ~ N(0, I)
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        f = mu + std * eps
-
-        return f, mu, logvar
+        # Add latent embedding to output (following Samaddar et al.)
+        # Linear projection broadcast to spatial dimensions
+        f_emb = self.latent_proj(f)[:, :, None, None]  # (B, C, 1, 1)
+        return self.conv_out(h) + f_emb
 
 
 # =====================================================================
@@ -489,9 +431,12 @@ class LCFM(nn.Module):
     Latent Conditional Flow Matching model.
 
     Combines:
-    1. Frozen VAE encoder (provided externally)
-    2. Trainable stochastic layer for latent refinement
-    3. U-Net velocity field network
+    1. VAE encoder with frozen backbone, trainable fc_mu/fc_logvar
+    2. U-Net velocity field network
+
+    Following Samaddar et al., the encoder backbone is frozen but the
+    final layers (fc_mu, fc_logvar) remain trainable to adapt the latent
+    distribution for flow matching.
 
     Training objective (Eq. 11 from Samaddar et al.):
         L = E[||v_θ(x_t, f, t) - u_t||²] + β * KL(q(f|x₁) || N(0,I))
@@ -499,7 +444,7 @@ class LCFM(nn.Module):
     where:
         - x_t = (1-t)*x₀ + t*x₁ (linear interpolation)
         - u_t = x₁ - x₀ (target velocity, constant along path)
-        - f ~ q(f|x₁) (latent from stochastic layer)
+        - f ~ q(f|x₁) (latent from encoder's trainable final layers)
     """
 
     def __init__(
@@ -507,6 +452,7 @@ class LCFM(nn.Module):
         vae_encoder: nn.Module,
         latent_dim: int = 32,
         in_channels: int = 5,
+        input_size: int = 64,
         base_channels: int = 64,
         beta: float = 0.001,
         **unet_kwargs,
@@ -515,22 +461,59 @@ class LCFM(nn.Module):
 
         self.latent_dim = latent_dim
         self.in_channels = in_channels
+        self.input_size = input_size
         self.beta = beta
 
-        # Frozen VAE encoder
+        # VAE encoder with frozen backbone but trainable final layers
+        # Following Samaddar et al.: freeze encoder backbone, keep fc_mu
+        # and fc_logvar trainable for flow matching adaptation
         self.vae_encoder = vae_encoder
-        for param in self.vae_encoder.parameters():
-            param.requires_grad = False
+        for name, param in self.vae_encoder.named_parameters():
+            if "fc_mu" in name or "fc_logvar" in name:
+                param.requires_grad = True  # Keep final layers trainable
+            else:
+                param.requires_grad = False  # Freeze backbone
+
+        # Validate that expected trainable layers exist
+        trainable_names = [
+            name
+            for name, p in self.vae_encoder.named_parameters()
+            if p.requires_grad
+        ]
+        if not any("fc_mu" in n for n in trainable_names):
+            raise ValueError(
+                "Encoder must have 'fc_mu' layer. "
+                "Found no trainable parameters matching 'fc_mu'."
+            )
+        if not any("fc_logvar" in n for n in trainable_names):
+            raise ValueError(
+                "Encoder must have 'fc_logvar' layer. "
+                "Found no trainable parameters matching 'fc_logvar'."
+            )
+
+        # Keep encoder in eval to prevent BatchNorm stats from updating
         self.vae_encoder.eval()
 
         # Trainable components
-        self.latent_layer = LatentStochasticLayer(latent_dim)
         self.velocity_net = VelocityUNet(
             in_channels=in_channels,
             latent_dim=latent_dim,
+            input_size=input_size,
             base_channels=base_channels,
             **unet_kwargs,
         )
+
+    def train(self, mode: bool = True):
+        """
+        Override train() to keep encoder in eval mode.
+
+        The encoder backbone uses BatchNorm which would update running
+        statistics during training if in training mode. We want the
+        frozen encoder to behave consistently.
+        """
+        super().train(mode)
+        self.vae_encoder.eval()  # Always keep encoder in eval mode
+        return self
 
     def encode(
         self, x: torch.Tensor
@@ -538,18 +521,26 @@ class LCFM(nn.Module):
         """
         Encode image to latent space.
 
+        Following Samaddar et al., the encoder backbone is frozen but
+        fc_mu and fc_logvar are trainable to adapt the latent
+        distribution for flow matching.
+
         Args:
             x: (batch, channels, H, W) input image
 
         Returns:
-            f: sampled latent
+            f: sampled latent (reparameterized)
             mu: mean of latent distribution
             logvar: log-variance of latent distribution
         """
-        with torch.no_grad():
-            mu_enc, logvar_enc = self.vae_encoder(x)
+        mu, logvar = self.vae_encoder(x)
 
-        return self.latent_layer(mu_enc, logvar_enc)
+        # Reparameterization trick: f = μ + σ * ε, where ε ~ N(0, I)
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        f = mu + std * eps
+
+        return f, mu, logvar
 
     def compute_loss(
         self, x1: torch.Tensor, return_components: bool = False
@@ -642,7 +633,13 @@ class LCFM(nn.Module):
         f, _, _ = self.encode(x_train)
 
         # Start from noise
-        x = torch.randn(batch_size, self.in_channels, 64, 64, device=device)
+        x = torch.randn(
+            batch_size,
+            self.in_channels,
+            self.input_size,
+            self.input_size,
+            device=device,
+        )
 
         trajectory = [x.clone()] if return_trajectory else None
 
@@ -701,7 +698,13 @@ class LCFM(nn.Module):
             return self.velocity_net(x, f, t_batch)
 
         # Initial condition
-        x0 = torch.randn(batch_size, self.in_channels, 64, 64, device=device)
+        x0 = torch.randn(
+            batch_size,
+            self.in_channels,
+            self.input_size,
+            self.input_size,
+            device=device,
+        )
 
         # Solve ODE
         t_span = torch.tensor([0.0, 1.0], device=device)

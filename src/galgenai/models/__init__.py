@@ -7,7 +7,7 @@ from .layers import (
     UpsampleBlock,
     SqueezeExcitationBlock,
 )
-from .lcfm import LCFM, VelocityUNet, LatentStochasticLayer
+from .lcfm import LCFM, VelocityUNet
 
 __all__ = [
     "VAE",
@@ -19,5 +19,4 @@ __all__ = [
     "SqueezeExcitationBlock",
     "LCFM",
     "VelocityUNet",
-    "LatentStochasticLayer",
 ]
