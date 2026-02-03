@@ -126,7 +126,7 @@ print("=" * 60)
 # The VAE has separate encoder and decoder components
 # We save just the encoder for use with LCFM
 encoder_path = output_dir / "encoder.pt"
-torch.save(vae.encoder.state_dict(), encoder_path)
+torch.save(vae_trainer.model.encoder.state_dict(), encoder_path)
 print(f"Encoder saved to: {encoder_path}")
 
 # Clean up VAE to free memory before LCFM training
@@ -155,18 +155,19 @@ encoder.to(device).eval()
 print(f"Loaded encoder from: {encoder_path}")
 
 # Create LCFM model
-# - Encoder is automatically frozen (requires_grad=False)
+# - Encoder backbone frozen, fc_mu/fc_logvar remain trainable
 # - base_channels=64: U-Net base channel count
 # - beta=0.001: KL weight (low for scientific data)
 lcfm = LCFM(
     vae_encoder=encoder,
     latent_dim=32,
     in_channels=5,
+    input_size=64,
     base_channels=64,
     beta=0.001,
 ).to(device)
 print(f"LCFM parameters: {sum(p.numel() for p in lcfm.parameters()):,}")
-print("  (encoder frozen, only flow network is trained)")
+print("  (encoder backbone frozen; fc_mu/fc_logvar and flow network trained)")
 
 # Configure LCFM training
 # - num_steps=500: step-based training (not epochs)
@@ -220,7 +221,7 @@ To load the trained LCFM model:
     encoder = VAEEncoder(in_channels=5, latent_dim=32,
                          input_size=64)
     encoder.load_state_dict(torch.load("{encoder_path}"))
-    lcfm = LCFM(encoder, latent_dim=32, in_channels=5)
+    lcfm = LCFM(encoder, latent_dim=32, in_channels=5, input_size=64)
     lcfm.load_state_dict(
         torch.load("{best_model}")["model_state_dict"]
     )
