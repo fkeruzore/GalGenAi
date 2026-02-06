@@ -36,3 +36,6 @@ wheels/
 # OS
 .DS_Store
 Thumbs.db
+
+# Misc
+old
