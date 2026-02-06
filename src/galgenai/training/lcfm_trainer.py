@@ -108,6 +108,7 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         self.model.eval()
         total_flow_loss = 0.0
         total_kl_loss = 0.0
+        total_total_loss = 0.0
         num_batches = 0
 
         for batch in self.val_loader:
@@ -116,11 +117,14 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
 
             total_flow_loss += loss_dict["flow_loss"]
             total_kl_loss += loss_dict["kl_loss"]
+            total_total_loss += loss_dict["total_loss"]
             num_batches += 1
 
+        self.model.train()
         return {
             "val_flow_loss": total_flow_loss / num_batches,
             "val_kl_loss": total_kl_loss / num_batches,
+            "val_total_loss": total_total_loss / num_batches,
         }
 
     @torch.no_grad()
@@ -135,6 +139,7 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         train_images = train_images[:num_samples]
 
         samples = self.model.sample(train_images, num_steps=50)
+        self.model.train()
         return samples, train_images
 
     def train(self):
@@ -201,6 +206,21 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
                     "lr": loss_dict["lr"],
                 }
 
+                # Validation
+                if self.global_step % self.config.validate_every == 0:
+                    val_metrics = self.validate()
+                    if val_metrics:
+                        pbar.write(
+                            f"  Step {self.global_step} Val"
+                            f" - Flow: "
+                            f"{val_metrics['val_flow_loss']:.3e}"
+                            f", KL: "
+                            f"{val_metrics['val_kl_loss']:.3e}"
+                            f", Total: "
+                            f"{val_metrics['val_total_loss']:.3e}"
+                        )
+                        avg_metrics.update(val_metrics)
+
                 self._log_metrics(avg_metrics)
 
                 if avg_metrics["total_loss"] < self.best_loss:
@@ -231,14 +251,6 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
                     },
                     sample_path,
                 )
-
-                # Validation
-                val_metrics = self.validate()
-                if val_metrics:
-                    pbar.write(
-                        f"  Val - Flow: {val_metrics['val_flow_loss']:.3e}, "
-                        f"KL: {val_metrics['val_kl_loss']:.3e}"
-                    )
 
             # Checkpointing
             if self.global_step % self.config.save_every == 0:

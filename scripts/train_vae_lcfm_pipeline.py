@@ -180,6 +180,7 @@ lcfm_config = LCFMTrainingConfig(
     warmup_steps=50,
     beta=0.001,
     sample_every=250,
+    validate_every=250,
     save_every=500,
     log_every=50,
     output_dir=str(output_dir / "lcfm"),

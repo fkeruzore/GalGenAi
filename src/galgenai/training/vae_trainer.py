@@ -176,7 +176,8 @@ class VAETrainer(BaseTrainer[VAETrainingConfig]):
         except RuntimeError:
             print("torch.compile() not available, skipping")
 
-        # Warmup forward pass to pay compile cost before the first epoch.
+        # Warmup forward pass to pay compile cost before the
+        # first epoch.
         warmup_batch = next(iter(self.train_loader))
         data, _, _ = extract_batch_data(warmup_batch, self.device)
         with torch.no_grad():

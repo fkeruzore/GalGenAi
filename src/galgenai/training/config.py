@@ -62,6 +62,9 @@ class LCFMTrainingConfig(BaseTrainingConfig):
     sample_every: int = 5000
     num_sample_images: int = 16
 
+    # Validation (should be a multiple of log_every)
+    validate_every: int = 500
+
     # Override defaults for step-based training
     log_every: int = 100
     save_every: int = 10_000

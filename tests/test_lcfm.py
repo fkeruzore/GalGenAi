@@ -2,6 +2,7 @@
 
 import torch
 import pytest
+from torch.utils.data import DataLoader, TensorDataset
 from galgenai.models import VAEEncoder
 from galgenai.models.lcfm import (
     LCFM,
@@ -9,6 +10,7 @@ from galgenai.models.lcfm import (
     AttentionBlock,
     count_parameters,
 )
+from galgenai.training import LCFMTrainer, LCFMTrainingConfig
 
 
 def test_lcfm_imports():
@@ -302,6 +304,51 @@ def test_runtime_input_size_mismatch():
         ValueError, match="Expected input size 64x64, got 64x32"
     ):
         unet(x_nonsquare, f, t)
+
+
+def test_lcfm_trainer_validate(tmp_path):
+    """Test that validate() returns expected keys and restores
+    train mode."""
+    encoder = VAEEncoder(in_channels=5, latent_dim=32, input_size=64)
+    encoder.eval()
+    lcfm = LCFM(
+        vae_encoder=encoder,
+        latent_dim=32,
+        in_channels=5,
+        input_size=64,
+        base_channels=32,
+    )
+
+    # Dummy data loaders
+    dummy_data = torch.randn(8, 5, 64, 64)
+    dummy_dataset = TensorDataset(dummy_data)
+    train_loader = DataLoader(dummy_dataset, batch_size=4)
+    val_loader = DataLoader(dummy_dataset, batch_size=4)
+
+    config = LCFMTrainingConfig(
+        num_steps=10,
+        log_every=5,
+        save_every=10,
+        validate_every=5,
+        output_dir=str(tmp_path),
+        device="cpu",
+    )
+
+    trainer = LCFMTrainer(
+        model=lcfm,
+        train_loader=train_loader,
+        config=config,
+        val_loader=val_loader,
+    )
+
+    # Put model in train mode before calling validate
+    lcfm.train()
+    val_metrics = trainer.validate()
+
+    assert "val_flow_loss" in val_metrics
+    assert "val_kl_loss" in val_metrics
+    assert "val_total_loss" in val_metrics
+    assert lcfm.training, "Model should be back in train mode"
 
 
 if __name__ == "__main__":
