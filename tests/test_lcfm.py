@@ -351,5 +351,111 @@ def test_lcfm_trainer_validate(tmp_path):
     assert lcfm.training, "Model should be back in train mode"
 
 
+def test_lcfm_weighted_loss():
+    """Test compute_loss with ivar and mask tensors."""
+    encoder = VAEEncoder(in_channels=5, latent_dim=32, input_size=64)
+    encoder.eval()
+    lcfm = LCFM(
+        encoder,
+        latent_dim=32,
+        in_channels=5,
+        input_size=64,
+        base_channels=32,
+    )
+
+    x = torch.randn(2, 5, 64, 64)
+    ivar = torch.ones(2, 5, 64, 64)
+    mask = torch.ones(2, 5, 64, 64)
+
+    loss, loss_dict = lcfm.compute_loss(
+        x, ivar=ivar, mask=mask, return_components=True
+    )
+
+    assert loss.item() > 0
+    assert "flow_loss" in loss_dict
+    assert "kl_loss" in loss_dict
+    assert "total_loss" in loss_dict
+
+
+def test_lcfm_mask_affects_loss():
+    """Test that partial masking changes the loss value."""
+    torch.manual_seed(42)
+    encoder = VAEEncoder(in_channels=5, latent_dim=32, input_size=64)
+    encoder.eval()
+    lcfm = LCFM(
+        encoder,
+        latent_dim=32,
+        in_channels=5,
+        input_size=64,
+        base_channels=32,
+    )
+
+    x = torch.randn(2, 5, 64, 64)
+    ivar = torch.ones(2, 5, 64, 64)
+
+    # Full mask
+    mask_full = torch.ones(2, 5, 64, 64)
+    # Partial mask: zero out half the pixels
+    mask_partial = torch.ones(2, 5, 64, 64)
+    mask_partial[:, :, :32, :] = 0.0
+
+    torch.manual_seed(0)
+    _, dict_full = lcfm.compute_loss(
+        x, ivar=ivar, mask=mask_full, return_components=True
+    )
+    torch.manual_seed(0)
+    _, dict_partial = lcfm.compute_loss(
+        x, ivar=ivar, mask=mask_partial, return_components=True
+    )
+
+    # Flow losses should differ (different masked regions)
+    assert dict_full["flow_loss"] != pytest.approx(
+        dict_partial["flow_loss"], abs=1e-6
+    )
+
+
+def test_lcfm_trainer_validate_with_weights(tmp_path):
+    """Test validate() with (flux, ivar, mask) dataset tuples."""
+    encoder = VAEEncoder(in_channels=5, latent_dim=32, input_size=64)
+    encoder.eval()
+    lcfm = LCFM(
+        vae_encoder=encoder,
+        latent_dim=32,
+        in_channels=5,
+        input_size=64,
+        base_channels=32,
+    )
+
+    flux = torch.randn(8, 5, 64, 64)
+    ivar = torch.ones(8, 5, 64, 64)
+    mask = torch.ones(8, 5, 64, 64)
+    dataset = TensorDataset(flux, ivar, mask)
+    train_loader = DataLoader(dataset, batch_size=4)
+    val_loader = DataLoader(dataset, batch_size=4)
+
+    config = LCFMTrainingConfig(
+        num_steps=10,
+        log_every=5,
+        save_every=10,
+        validate_every=5,
+        output_dir=str(tmp_path),
+        device="cpu",
+    )
+
+    trainer = LCFMTrainer(
+        model=lcfm,
+        train_loader=train_loader,
+        config=config,
+        val_loader=val_loader,
+    )
+
+    lcfm.train()
+    val_metrics = trainer.validate()
+
+    assert "val_flow_loss" in val_metrics
+    assert "val_kl_loss" in val_metrics
+    assert "val_total_loss" in val_metrics
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

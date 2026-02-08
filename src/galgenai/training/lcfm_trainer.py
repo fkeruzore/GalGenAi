@@ -83,10 +83,12 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
 
     def _train_step(self, batch: Any) -> Dict[str, float]:
         """Execute single LCFM training step."""
-        x, _, _ = extract_batch_data(batch, self.device)
+        x, ivar, mask = extract_batch_data(batch, self.device)
 
         # Compute loss using model method
-        loss, loss_dict = self.model.compute_loss(x, return_components=True)
+        loss, loss_dict = self.model.compute_loss(
+            x, ivar=ivar, mask=mask, return_components=True
+        )
 
         # Backward pass
         self.optimizer.zero_grad()
@@ -120,8 +122,10 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         num_batches = 0
 
         for batch in self.val_loader:
-            x, _, _ = extract_batch_data(batch, self.device)
-            _, loss_dict = self.model.compute_loss(x, return_components=True)
+            x, ivar, mask = extract_batch_data(batch, self.device)
+            _, loss_dict = self.model.compute_loss(
+                x, ivar=ivar, mask=mask, return_components=True
+            )
 
             total_flow_loss += loss_dict["flow_loss"]
             total_kl_loss += loss_dict["kl_loss"]

@@ -15,7 +15,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchdiffeq import odeint
-from typing import Tuple
+from typing import Optional, Tuple
 
 
 class ResBlock(nn.Module):
@@ -543,7 +543,11 @@ class LCFM(nn.Module):
         return f, mu, logvar
 
     def compute_loss(
-        self, x1: torch.Tensor, return_components: bool = False
+        self,
+        x1: torch.Tensor,
+        ivar: Optional[torch.Tensor] = None,
+        mask: Optional[torch.Tensor] = None,
+        return_components: bool = False,
     ) -> torch.Tensor:
         """
         Compute LCFM training loss.
@@ -580,8 +584,15 @@ class LCFM(nn.Module):
         # 6. Predict velocity
         v_pred = self.velocity_net(x_t, f, t)
 
-        # 7. Flow matching loss (MSE)
-        flow_loss = F.mse_loss(v_pred, u_t)
+        # 7. Flow matching loss (weighted MSE when ivar/mask provided)
+        if ivar is not None and mask is not None:
+            squared_error = (v_pred - u_t).pow(2)
+            mask_float = mask.float()
+            weighted_error = squared_error * ivar * mask_float
+            num_valid = mask_float.sum().clamp(min=1.0)
+            flow_loss = weighted_error.sum() / num_valid
+        else:
+            flow_loss = F.mse_loss(v_pred, u_t)
 
         # 8. KL divergence loss: KL(N(μ, σ²) || N(0, I))
         # = 0.5 * sum(μ² + σ² - log(σ²) - 1)
