@@ -38,6 +38,9 @@ output_dir = Path("./pipeline_output")
 output_dir.mkdir(exist_ok=True)
 print(f"Output directory: {output_dir.absolute()}")
 
+# Set to False to skip VAE training and load from existing checkpoint
+train_vae = True
+
 
 # =================================================================
 # ----  DATA LOADING  --------------------------------------------
@@ -48,7 +51,7 @@ print("LOADING DATA")
 print("=" * 60)
 
 # Path to the HSC mini dataset (HuggingFace format)
-data_path = "./data/hsc_mmu_mini/"
+data_path = "./data/hsc_mmu/"
 
 # Load the raw HuggingFace dataset
 dataset_raw = load_from_disk(data_path)
@@ -72,67 +75,93 @@ print(f"Train batches: {len(train_loader)}, Val batches: {len(val_loader)}")
 # ----  VAE TRAINING  ---------------------------------------------
 # =================================================================
 
-print("\n" + "=" * 60)
-print("TRAINING VAE")
-print("=" * 60)
-
-# Create VAE model
-# - in_channels=5: HSC has 5 photometric bands (g, r, i, z, y)
-# - latent_dim=32: dimension of the latent space
-# - input_size=64: matches our crop size
-vae = VAE(
-    in_channels=5,
-    latent_dim=32,
-    input_size=64,
-)
-print(f"VAE parameters: {sum(p.numel() for p in vae.parameters()):,}")
-
-# Configure VAE training
-# - num_epochs=5: quick demo training
-# - reconstruction_loss_fn="masked_weighted_mse": uses inverse
-#   variance weights and masks for bad pixels/noise
-# - beta=1.0: standard VAE
-vae_config = VAETrainingConfig(
-    num_epochs=3,
-    learning_rate=1e-3,
-    reconstruction_loss_fn="masked_weighted_mse",
-    beta=1.0,
-    output_dir=str(output_dir / "vae"),
-    save_every=5,  # Save checkpoint every 5 epochs
-    device=str(device),
-)
-
-# Create trainer and run training
-vae_trainer = VAETrainer(
-    model=vae,
-    train_loader=train_loader,
-    config=vae_config,
-    val_loader=val_loader,
-)
-vae_trainer.train()
-
-print("VAE training complete!")
-print(f"Checkpoints saved to: {output_dir / 'vae' / 'checkpoints'}")
-
-
-# =================================================================
-# ----  EXTRACT & SAVE ENCODER  -----------------------------------
-# =================================================================
-
-print("\n" + "=" * 60)
-print("SAVING FROZEN ENCODER")
-print("=" * 60)
-
-# The VAE has separate encoder and decoder components
-# We save just the encoder for use with LCFM
 encoder_path = output_dir / "encoder.pt"
-torch.save(vae_trainer.model.encoder.state_dict(), encoder_path)
-print(f"Encoder saved to: {encoder_path}")
 
-# Clean up VAE to free memory before LCFM training
-del vae, vae_trainer
-if torch.cuda.is_available():
-    torch.cuda.empty_cache()
+if train_vae:
+    print("\n" + "=" * 60)
+    print("TRAINING VAE")
+    print("=" * 60)
+
+    # Create VAE model
+    # - in_channels=5: HSC has 5 photometric bands (g, r, i, z, y)
+    # - latent_dim=32: dimension of the latent space
+    # - input_size=64: matches our crop size
+    vae = VAE(
+        in_channels=5,
+        latent_dim=32,
+        input_size=64,
+    )
+    print(f"VAE parameters: {sum(p.numel() for p in vae.parameters()):,}")
+
+    # Configure VAE training
+    # - num_epochs=5: quick demo training
+    # - reconstruction_loss_fn="masked_weighted_mse": uses inverse
+    #   variance weights and masks for bad pixels/noise
+    # - beta=1.0: standard VAE
+    vae_config = VAETrainingConfig(
+        num_epochs=64,
+        learning_rate=1e-3,
+        reconstruction_loss_fn="masked_weighted_mse",
+        beta=1.0,
+        output_dir=str(output_dir / "vae"),
+        save_every=8,  # Save checkpoint every 5 epochs
+        device=str(device),
+    )
+
+    # Create trainer and run training
+    vae_trainer = VAETrainer(
+        model=vae,
+        train_loader=train_loader,
+        config=vae_config,
+        val_loader=val_loader,
+    )
+    vae_trainer.train()
+
+    print("VAE training complete!")
+    print(f"Checkpoints saved to: {output_dir / 'vae' / 'checkpoints'}")
+
+    # =============================================================
+    # ----  EXTRACT & SAVE ENCODER  -------------------------------
+    # =============================================================
+
+    print("\n" + "=" * 60)
+    print("SAVING FROZEN ENCODER")
+    print("=" * 60)
+
+    # The VAE has separate encoder and decoder components
+    # We save just the encoder for use with LCFM
+    torch.save(vae_trainer.model.encoder.state_dict(), encoder_path)
+    print(f"Encoder saved to: {encoder_path}")
+
+    # Clean up VAE to free memory before LCFM training
+    del vae, vae_trainer
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+else:
+    print("\n" + "=" * 60)
+    print("LOADING VAE FROM CHECKPOINT (train_vae=False)")
+    print("=" * 60)
+
+    # Load trained VAE weights from best checkpoint
+    vae_ckpt_path = output_dir / "vae" / "checkpoints" / "best.pt"
+    vae = VAE(
+        in_channels=5,
+        latent_dim=32,
+        input_size=64,
+    )
+    checkpoint = torch.load(vae_ckpt_path, map_location=device)
+    vae.load_state_dict(checkpoint["model_state_dict"])
+    print(f"Loaded VAE from: {vae_ckpt_path}")
+
+    # Save the encoder for LCFM
+    torch.save(vae.encoder.state_dict(), encoder_path)
+    print(f"Encoder saved to: {encoder_path}")
+
+    # Clean up VAE to free memory before LCFM training
+    del vae, checkpoint
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 # =================================================================
@@ -175,14 +204,14 @@ print("  (encoder backbone frozen; fc_mu/fc_logvar and flow network trained)")
 # - warmup_steps=50: linear LR warmup
 # - sample_every=250: generate samples periodically
 lcfm_config = LCFMTrainingConfig(
-    num_steps=500,
+    num_steps=5000,
     learning_rate=2e-4,
     warmup_steps=50,
     beta=0.001,
-    sample_every=250,
+    sample_every=500,
     validate_every=250,
-    save_every=500,
-    log_every=50,
+    save_every=250,
+    log_every=500,
     output_dir=str(output_dir / "lcfm"),
     device=str(device),
 )
