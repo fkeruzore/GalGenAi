@@ -13,4 +13,5 @@ __all__ = [
     "data",
     "get_device",
     "get_device_name",
+    "config",
 ]

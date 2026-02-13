@@ -1,0 +1,10 @@
+cosmos:
+  catalog_path: /Users/bbiswas/GalGenAi/data/COSMOSWeb_mastercatalog_v1.fits
+  hf_dataset_path: /Users/bbiswas/GalGenAi/src/galgenai/cosmos/galaxy_dataset_hf
+  image_size: 45
+  HST_snr_threshold: 50
+  train-ratio: 0.8
+  val-ratio: 0.1
+  test-ratio: 0.1
+  num_workers: 8
+  save_individual_files: False
