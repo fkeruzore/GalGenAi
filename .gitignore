@@ -21,6 +21,8 @@ wheels/
 *.png
 *.jpg
 *.jpeg
+*.fits
+*.npy
 
 # Jupyter
 .ipynb_checkpoints/
