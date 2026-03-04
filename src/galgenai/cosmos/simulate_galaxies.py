@@ -85,13 +85,6 @@ def sim_single_band_sersic_galaxy(flux, hlr, sersic_n, axis_ratio, position_angl
         galsim.GSObject
             Galaxy profile
         """
-        # Ensure valid Sersic index #   TODO: verify
-        # sersic_n = np.clip(sersic_n, 0.3, 6.0)
-        # Round to 2 decimal places to bound GalSim's internal SersicInfo C++ cache.
-        # Without this, each unique float n gets its own Hankel-transform lookup table
-        # cached forever, causing unbounded C++ heap growth (std::bad_alloc) over large runs.
-        sersic_n = round(float(sersic_n), 2)
-
         # Create Sersic profile with GSParams
         gal = galsim.Sersic(n=sersic_n, half_light_radius=hlr, flux=flux, gsparams=gsparams)
 
@@ -106,24 +99,31 @@ def sim_single_band_sersic_galaxy(flux, hlr, sersic_n, axis_ratio, position_angl
 class GalaxySim:
     """Galaxy image simulator using Galsim"""
 
-    def __init__(self, catalog=None, survey_name='HSC', image_size=53, random_seed=None):
+    def __init__(self, catalog=None, survey_name='HSC', image_size=53, random_seed=None, max_fft_size=512):
         """
         Initialize the simulator
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         catalog : COSMOSWebCatalog, optional
-            Galaxy catalog to use
+            Galaxy catalog to use (default: None)
         survey_name : str, optional
-            Survey name (default: 'HSC')
+            Survey name for pixel scale and filter definitions (default: 'HSC')
+        image_size : int, optional
+            Size of simulated images in pixels (default: 53)
         random_seed : int, optional
-            Random seed for reproducibility
+            Random seed for reproducibility. If None, uses 12345 (default: None)
+        max_fft_size : int, optional
+            Maximum FFT size for Galsim operations (default: 512)
         """
         self.catalog = catalog
         self.survey = get_survey(survey_name=survey_name)
+        self.survey_name = survey_name
         self.image_size = image_size
+        self.random_seed = random_seed
+        self.max_fft_size = max_fft_size
         self.rng = galsim.BaseDeviate(random_seed or 12345)
-        self.gsparams = galsim.GSParams(maximum_fft_size=128)
+        self.gsparams = galsim.GSParams(maximum_fft_size=max_fft_size)
 
     def get_psf(self, psf_type, psf_params, gsparams=None):
         """
@@ -183,9 +183,6 @@ class GalaxySim:
 
         # Convolve galaxy with PSF (both already have gsparams)
         gal_conv = galsim.Convolve([galaxy, psf], gsparams=gsparams)
-        gal_conv = gal_conv.withGSParams(
-            maximum_fft_size=128,
-        )
 
         # Draw noiseless image (expected counts per pixel, used for ivar)
         image = gal_conv.drawImage(

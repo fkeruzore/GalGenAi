@@ -14,13 +14,13 @@ class COSMOSWebCatalog:
     """Class to handle COSMOSWeb galaxy catalog data"""
 
     def __init__(
-            self, 
-            catalog_path=None, 
-            required_columns=None, 
-            required_columns_only=False, 
-            warn_flag_cut=0, 
-            galaxies_only=True, 
-            filter_invalid_mags=False, 
+            self,
+            catalog_path=None,
+            required_columns_only=False,
+            required_columns=None,
+            warn_flag_cut=0,
+            galaxies_only=True,
+            filter_invalid_mags=False,
             mag_sentinel=999.0,
         ):
         """
@@ -30,10 +30,19 @@ class COSMOSWebCatalog:
         -----------
         catalog_path : str, optional
             Path to the COSMOSWeb FITS catalog file.
-            If not provided, it loads Config file (ai_univ_config.yaml)
+            If not provided, loads path from config file (galgenai_config.yaml).
             The catalog is not included in the package and must be downloaded separately.
+        required_columns_only : bool, optional
+            If True, only load columns specified in required_columns (default: False)
+        required_columns : list of str, optional
+            List of column names to load from the catalog (default: None, loads all columns)
+        warn_flag_cut : int, optional
+            Filter galaxies by warn_flag value. If None, no filtering applied (default: 0)
+        galaxies_only : bool, optional
+            If True, filter out stars and QSOs, keeping only galaxies (default: True).
+            The classification comes from LePHARE.
         filter_invalid_mags : bool, optional
-            If True, filter out galaxies with sentinel magnitude values (default: True)
+            If True, filter out galaxies with sentinel magnitude values (default: False)
         mag_sentinel : float, optional
             Sentinel value indicating missing magnitude data (default: 999.0)
         """
@@ -154,33 +163,3 @@ class COSMOSWebCatalog:
         return matching_cols
 
 
-
-
-
-def main():
-    """Example usage"""
-
-    # Initialize catalog
-    catalog = COSMOSWebCatalog()
-
-    # Show summary
-    catalog.get_summary_statistics()
-
-    # Example 1: Get first 100 galaxies
-    print("\n=== Example 1: First 100 galaxies ===")
-    galaxies_100 = catalog.get_galaxies(n_galaxies=100)
-    print(f"Retrieved {len(galaxies_100)} galaxies")
-
-    # Example 2: Filter by redshift
-    print("\n=== Example 2: Filter by redshift ===")
-    high_z_galaxies = catalog.filter_by_redshift(z_min=2.0, z_max=4.0)
-
-    # Example 3: Get specific properties
-    print("\n=== Example 3: Extract galaxy properties ===")
-    props = catalog.get_galaxy_properties()
-    print(f"Properties Table shape: ({len(props)}, {len(props.colnames)})")
-    print(f"Columns: {props.colnames}")
-    print("\nFirst 5 rows:")
-    print(props[:5])
-
-    return catalog
