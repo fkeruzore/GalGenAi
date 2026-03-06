@@ -480,3 +480,110 @@ class GalaxySim:
         if inplace:
             self.catalog.data = filtered
         return filtered
+
+    def create_dataset(self, output_dir, filter_names=None, num_workers=1, filter_high_snr=True, max_galaxies=None):
+        """
+        Generate galaxy images and save as FITS with a single metadata CSV.
+
+        All galaxies are stored together in output_dir/images/.  The
+        train/validation/test split is applied at runtime when loading the
+        dataset (see cosmos_dataset.load_fits_dataset).
+
+        When num_workers > 1, the catalog is divided into num_workers chunks that
+        are processed in parallel via multiprocessing.  Each worker creates its own
+        GalaxySim instance with an independent random seed.
+
+        Parameters
+        ----------
+        output_dir : str or Path
+            Directory where to save the dataset
+        filter_names : list of str, optional
+            List of filter names to process. If None, uses all available filters
+        num_workers : int, optional
+            Number of parallel workers (default: 1)
+        filter_high_snr : bool, optional
+            If True, filter galaxies by SNR threshold. If False, use all catalog data (default: False)
+        max_galaxies : int, optional
+            Maximum number of galaxies to process. If None, process all (default: None)
+        """
+        if self.catalog is None:
+            raise ValueError("No catalog loaded. Please set self.catalog")
+
+        if filter_names is None:
+            filter_names = self.survey.available_filters
+
+        # Get catalog data - either filtered or all
+        if filter_high_snr:
+            self.filter_high_snr_galaxies()
+
+        data = self.catalog.data
+
+        # Optionally limit number of galaxies
+        if max_galaxies is not None and max_galaxies < len(data):
+            print(f"Limiting to {max_galaxies} galaxies...")
+            rng = np.random.default_rng(self.random_seed)
+            indices = rng.choice(len(data), max_galaxies, replace=False)
+            data = data[indices]
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        images_path = output_dir / "images"
+        images_path.mkdir(parents=True, exist_ok=True)
+
+        sim_kwargs = {
+            "survey_name": self.survey.name,
+            "image_size": self.image_size,
+            "max_fft_size": self.max_fft_size,
+            "catalog_columns": self.catalog_columns,
+        }
+
+        print(f"\nProcessing {len(data)} galaxies with {num_workers} worker(s)...")
+
+        galaxy_rows = [dict(zip(row.colnames, row)) for row in data]
+        if num_workers != 1:
+            chunks = np.array_split(galaxy_rows, num_workers)
+        else:
+            chunks = [galaxy_rows]
+        chunk_args = [
+            (
+                list(chunk),
+                str(images_path),
+                filter_names,
+                sim_kwargs,
+                self.random_seed + worker_idx if self.random_seed else worker_idx,
+            )
+            for worker_idx, chunk in enumerate(chunks)
+            if len(chunk) > 0
+        ]
+
+        if num_workers > 1:
+            with Pool(processes=num_workers) as pool:
+                results = list(
+                    tqdm(
+                        pool.imap_unordered(_process_chunk_args, chunk_args),
+                        total=len(chunk_args),
+                        desc="Generating galaxies",
+                    )
+                )
+        else:
+            results = [_process_chunk(*chunk_args[0], show_progress=True)] if chunk_args else []
+
+        all_metadata_rows = []
+        total_failed = 0
+        for metadata_rows, failed_count in results:
+            all_metadata_rows.extend(metadata_rows)
+            total_failed += failed_count
+
+        all_metadata_rows.sort(key=lambda r: r["id"])
+
+        csv_path = output_dir / "metadata.csv"
+        with open(csv_path, "w", newline="") as csvfile:
+            csv_writer = csv.DictWriter(csvfile, fieldnames=all_metadata_rows[0].keys())
+            csv_writer.writeheader()
+            csv_writer.writerows(all_metadata_rows)
+
+        if total_failed > 0:
+            print(f"Warning: Failed to generate {total_failed} galaxies")
+        print(f"{len(all_metadata_rows)} galaxies saved to {output_dir}")
+
