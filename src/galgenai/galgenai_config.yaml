@@ -13,3 +13,14 @@ cosmos:
   max_galaxies: 50000 # inluding train + test + val [Some simulation may fail]
   seed: 42 # To add noise etc.
   max_fft_size: 512
+  catalog_columns: # These are names of catalog columns 
+    magnitude_prefix: mag_model_hsc-
+    hlr: radius_sersic
+    sersic_n: sersic
+    sersic_ratio: axratio_sersic
+    sersic_angle: angle_sersic
+    ra: ra
+    dec: dec
+    photz: zfinal
+    galid: id
+    snr: snr_hst-f814w
