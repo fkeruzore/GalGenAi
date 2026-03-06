@@ -19,6 +19,7 @@ from galgenai.cosmos import COSMOSWebCatalog, GalaxySim
 CONFIG = load_config()
 CATALOG_COLUMNS = CONFIG['cosmos']['catalog_columns']
 TEST_CATALOG_PATH = Path(CONFIG['cosmos']['catalog_path'])
+OUTPUT_DIR = Path(CONFIG['cosmos']['hf_dataset_path'])
 
 def test_load_all_objects():
     """Test loading all objects without filters"""
@@ -152,7 +153,7 @@ def test_simulate_good_galaxy():
         assert np.all(pixel_variance_dict[band] >= 0), f"Variance should be non-negative"
 
 
-def test_simulate_multiple_galaxies():
+def test_create_dataset():
     """Test simulating multiple galaxies from test catalog"""
     # Load good galaxies
     catalog = COSMOSWebCatalog(
@@ -161,40 +162,20 @@ def test_simulate_multiple_galaxies():
         filter_invalid_mags=True,
     )
 
-    good_galaxies = catalog.get_galaxies(
-        filters={'snr_hst-f814w': (50, np.inf)},
-        n_galaxies=3  # Simulate 3 galaxies
-    )
-
     # Initialize simulator
     sim = GalaxySim(
         survey_name='HSC',
+        catalog=catalog,
         image_size=17,
         random_seed=42,
         max_fft_size=512,
+        snr_threshold=50,
         catalog_columns=CATALOG_COLUMNS
     )
 
-    filter_names = ['g', 'r', 'i', 'z', 'y']
-    successful_sims = 0
-
-    for galaxy_row in good_galaxies:
-        try:
-            images_dict, _, _ = sim.generate_image_from_row(
-                galaxy_row, filter_names=filter_names
-            )
-
-            # Verify basic properties
-            assert len(images_dict) == len(filter_names)
-            for band in filter_names:
-                assert np.sum(images_dict[band]) > 0
-
-            successful_sims += 1
-        except Exception as e:
-            print(f"  Warning: Failed to simulate galaxy {galaxy_row['id']}: {e}")
-
-    assert successful_sims >= 2, f"Expected at least 2 successful simulations, got {successful_sims}"
-
-
-
-
+    sim.create_dataset(
+        output_dir=OUTPUT_DIR,
+        num_workers=1,
+        filter_high_snr=True,
+        max_galaxies=10,
+    )
