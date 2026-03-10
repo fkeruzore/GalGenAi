@@ -65,6 +65,12 @@ def parse_args():
         default=True,
         help="Write computed stats to the config file (default: True)"
     )
+    parser.add_argument(
+        "--skip-conditions",
+        action="store_true",
+        default=False,
+        help="Skip computing conditional normalization statistics (default: False)"
+    )
 
     return parser.parse_args()
 
@@ -128,6 +134,7 @@ def main():
     print(f"Number of samples: {args.n_samples if args.n_samples else 'entire dataset'}")
     print(f"Crop size: {nx}x{nx}")
     print(f"Condition columns: {condition_cols}")
+    print(f"Skip conditions: {args.skip_conditions}")
 
     # -----------------------------------------------------------------------
     # Load dataset
@@ -195,7 +202,11 @@ def main():
     # -----------------------------------------------------------------------
     print("\n[3/3] Computing conditional normalization stats...")
 
-    if condition_cols:
+    if args.skip_conditions:
+        print("  Skipping conditional stats (--skip-conditions flag set).")
+        cond_stats = None
+        cond_stats_path = None
+    elif condition_cols:
         cond_stats = compute_conditional_stats(
             dataset_raw,
             cols=condition_cols,
