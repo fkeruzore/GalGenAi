@@ -221,13 +221,15 @@ class VAETrainer(BaseTrainer[VAETrainingConfig]):
             ):
                 val_metrics = self.validate()
                 if val_metrics:
-                    print(f"  Val - Loss: {val_metrics['val_total_loss']:.3e}")
+                    val_loss = val_metrics['val_total_loss']
+                    print(f"  Val - Loss: {val_loss:.3e}")
                     train_metrics.update(val_metrics)
 
-            # Track best and save
-            is_best = train_metrics["total_loss"] < self.best_loss
-            if is_best:
-                self.best_loss = train_metrics["total_loss"]
+                    # Track best model based on validation loss
+                    if val_loss < self.best_loss:
+                        self.best_loss = val_loss
+                        self.save_checkpoint(is_best=True)
+                        print(f"  New best validation loss: {self.best_loss:.3e} — saved best.pt")
 
             self._log_metrics(train_metrics)
 
