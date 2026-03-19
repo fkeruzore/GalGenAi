@@ -145,9 +145,20 @@ def main():
     # Load dataset
     # ------------------------------------------------------------------
     print(f"\nLoading FITS dataset from: {dataset_path}")
+
+    # Extract magnitude columns and redshift from config
+    catalog_cols = cosmos_cfg["catalog_columns"]
+    mag_prefix = catalog_cols["magnitude_prefix"]
+    redshift_col = catalog_cols["photz"]
+
+    # Get magnitude columns from condition_cols using the prefix
+    mag_cols = [col for col in condition_cols if col.startswith(mag_prefix)]
+
     dataset_raw = load_fits_dataset(
         dataset_path,
         metadata_file="metadata.csv",
+        mag_cols=mag_cols,
+        redshift_col=redshift_col,
     )
 
     n_total = len(dataset_raw)
