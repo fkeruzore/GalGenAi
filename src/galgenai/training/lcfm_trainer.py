@@ -160,11 +160,14 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         print(f"Training for {self.config.num_steps - self.global_step} steps")
 
         self.model.train()
-        try:
-            self.model = torch.compile(self.model)
-            print("Model compiled with torch.compile()")
-        except RuntimeError:
-            print("torch.compile() not available, skipping")
+        if self.device.type == "mps":
+            print("torch.compile() skipped on MPS (inductor Metal backend bug)")
+        else:
+            try:
+                self.model = torch.compile(self.model)
+                print("Model compiled with torch.compile()")
+            except RuntimeError:
+                print("torch.compile() not available, skipping")
 
         def infinite_loader():
             while True:
