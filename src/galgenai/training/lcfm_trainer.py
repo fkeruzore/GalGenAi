@@ -160,11 +160,14 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         print(f"Training for {self.config.num_steps - self.global_step} steps")
 
         self.model.train()
-        try:
-            self.model = torch.compile(self.model)
-            print("Model compiled with torch.compile()")
-        except RuntimeError:
-            print("torch.compile() not available, skipping")
+        if self.device.type == "mps":
+            print("torch.compile() skipped on MPS (inductor Metal backend bug)")
+        else:
+            try:
+                self.model = torch.compile(self.model)
+                print("Model compiled with torch.compile()")
+            except RuntimeError:
+                print("torch.compile() not available, skipping")
 
         def infinite_loader():
             while True:
@@ -235,8 +238,20 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
 
                 self._log_metrics(avg_metrics)
 
-                if avg_metrics["total_loss"] < self.best_loss:
-                    self.best_loss = avg_metrics["total_loss"]
+                # Track best loss (use validation if available, otherwise training)
+                if val_metrics:
+                    current_loss = val_metrics["val_total_loss"]
+                else:
+                    current_loss = avg_metrics["total_loss"]
+
+                if current_loss < self.best_loss:
+                    self.best_loss = current_loss
+                    loss_type = "val" if val_metrics else "train"
+                    self.save_checkpoint(is_best=True)
+                    pbar.write(
+                        f"  New best {loss_type} loss {current_loss:.4f} at step "
+                        f"{self.global_step} — saved best.pt"
+                    )
 
                 # Reset running stats
                 running_flow_loss = 0.0
@@ -270,5 +285,6 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
 
         pbar.close()
         print("\nTraining complete!")
-        final_loss = running_total_loss / max(log_steps, 1)
-        self.save_checkpoint(is_best=(final_loss <= self.best_loss))
+
+        # Save final checkpoint (best.pt already saved whenever a new best was found)
+        self.save_checkpoint()

@@ -170,11 +170,14 @@ class VAETrainer(BaseTrainer[VAETrainingConfig]):
         print("-" * 60)
 
         self.model.train()
-        try:
-            self.model = torch.compile(self.model)
-            print("Model compiled with torch.compile()")
-        except RuntimeError:
-            print("torch.compile() not available, skipping")
+        if self.device.type == "mps":
+            print("torch.compile() skipped on MPS")
+        else:
+            try:
+                self.model = torch.compile(self.model)
+                print("Model compiled with torch.compile()")
+            except RuntimeError:
+                print("torch.compile() not available, skipping")
 
         # Warmup forward pass to pay compile cost before the
         # first epoch.
@@ -218,19 +221,21 @@ class VAETrainer(BaseTrainer[VAETrainingConfig]):
             ):
                 val_metrics = self.validate()
                 if val_metrics:
-                    print(f"  Val - Loss: {val_metrics['val_total_loss']:.3e}")
+                    val_loss = val_metrics['val_total_loss']
+                    print(f"  Val - Loss: {val_loss:.3e}")
                     train_metrics.update(val_metrics)
 
-            # Track best and save
-            is_best = train_metrics["total_loss"] < self.best_loss
-            if is_best:
-                self.best_loss = train_metrics["total_loss"]
+                    # Track best model based on validation loss
+                    if val_loss < self.best_loss:
+                        self.best_loss = val_loss
+                        self.save_checkpoint(is_best=True)
+                        print(f"  New best validation loss: {self.best_loss:.3e} — saved best.pt")
 
             self._log_metrics(train_metrics)
 
-            # Checkpointing
+            # Checkpointing (regular scheduled checkpoints)
             if epoch % self.config.save_every == 0:
-                self.save_checkpoint(is_best=is_best)
+                self.save_checkpoint(is_best=False)
 
         print("\nTraining complete!")
         self.save_checkpoint(is_best=False)

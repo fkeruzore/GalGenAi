@@ -70,3 +70,24 @@ class LCFMTrainingConfig(BaseTrainingConfig):
     save_every: int = 10_000
     learning_rate: float = 2e-4
     weight_decay: float = 0.01
+
+
+@dataclass
+class CNFTrainingConfig(BaseTrainingConfig):
+    """CNF training config."""
+
+    # Step-based training
+    num_steps: int = 50_000
+    warmup_steps: int = 1000
+
+    # Sampling during training
+    sample_every: int = 5000
+    num_sample_latents: int = 64
+
+    # Validation
+    validate_every: int = 500
+
+    # Override defaults for step-based training
+    save_every: int = 10_000
+    learning_rate: float = 1e-4
+    weight_decay: float = 0.01

@@ -1,3 +1,4 @@
+run_name: arcsinh
 cosmos:
   catalog_path: src/galgenai/cosmos/data/test_catalog_30objects.fits
   hf_dataset_path: src/galgenai/cosmos/data/HSC_dataset30
@@ -24,3 +25,94 @@ cosmos:
     photz: zfinal
     galid: id
     snr: snr_hst-f814w
+  normalization:
+    image:
+      linear:
+        min:
+        - -673.4
+        - -918.2
+        - -1822.98
+        - -2117.36
+        - -2305.81
+        max:
+        - 100730.6
+        - 107760.8
+        - 254625.02
+        - 87246.64
+        - 74290.19
+      arcsinh:
+        min:
+        - -0.3
+        - -0.22
+        - -0.17
+        - -0.36
+        - -0.45
+        max:
+        - 4.51
+        - 3.94
+        - 3.86
+        - 3.42
+        - 3.41
+        scale:
+        - 2210.23
+        - 4199.53
+        - 10734.38
+        - 5723.21
+        - 4938.81
+    conditions:
+      cols:
+      - mag_model_hsc-g
+      - mag_model_hsc-r
+      - mag_model_hsc-i
+      - mag_model_hsc-z
+      - mag_model_hsc-y
+      - zfinal
+      min:
+      - 18.68
+      - 18.35
+      - 18.11
+      - 17.82
+      - 17.61
+      - 0.0
+      max:
+      - 30.35
+      - 27.38
+      - 26.41
+      - 26.93
+      - 29.05
+      - 4.96
+hsc_mmu:
+  hf_dataset_path: <<add path>>
+training:
+  output_dir: scripts/cosmos_output
+  nx: 32
+  batch_size: 64
+  model:
+    in_channels: 5
+    latent_dim: 32
+    base_channels: 16
+  vae:
+    epochs: 30
+    lr: 0.0001
+    beta: 1.0e-08
+    save_every: 8
+    validate_every: 5
+    norm_type: arcsinh
+    reconstruction_loss_fn: mse
+  cnf:
+    steps: 20000
+    lr: 0.0001
+    warmup: 1000
+    num_blocks: 8
+    hidden_dim: 256
+    sample_every: 5000
+    validate_every: 2000
+    save_every: 10000
+    condition_cols:
+    - mag_model_hsc-g
+    - mag_model_hsc-r
+    - mag_model_hsc-i
+    - mag_model_hsc-z
+    - mag_model_hsc-y
+    - zfinal
+

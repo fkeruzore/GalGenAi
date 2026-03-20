@@ -8,6 +8,12 @@ from .layers import (
     SqueezeExcitationBlock,
 )
 from .lcfm import LCFM, VelocityUNet
+from .cnf import ConditionalNormalizingFlow
+from .cnf_layers import (
+    AffineCoupling,
+    ConditionNetwork,
+    TransformationNetwork,
+)
 
 __all__ = [
     "VAE",
@@ -19,4 +25,8 @@ __all__ = [
     "SqueezeExcitationBlock",
     "LCFM",
     "VelocityUNet",
+    "ConditionalNormalizingFlow",
+    "AffineCoupling",
+    "ConditionNetwork",
+    "TransformationNetwork",
 ]
