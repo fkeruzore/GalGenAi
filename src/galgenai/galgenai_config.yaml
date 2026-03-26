@@ -14,15 +14,20 @@ cosmos:
   max_galaxies: 50000 # inluding train + test + val [Some simulation may fail]
   seed: 42 # To add noise etc.
   max_fft_size: 512
-  catalog_columns: # These are names of catalog columns 
-    magnitude_prefix: mag_model_hsc-
+  catalog_columns: # These are names of catalog columns
+    mag_cols:
+      - mag_model_hsc-g
+      - mag_model_hsc-r
+      - mag_model_hsc-i
+      - mag_model_hsc-z
+      - mag_model_hsc-y
     hlr: radius_sersic
     sersic_n: sersic
     sersic_ratio: axratio_sersic
     sersic_angle: angle_sersic
     ra: ra
     dec: dec
-    photz: zfinal
+    redshift_col: zfinal
     galid: id
     snr: snr_hst-f814w
   normalization:
@@ -82,7 +87,22 @@ cosmos:
       - 29.05
       - 4.96
 hsc_mmu:
-  hf_dataset_path: <<add path>>
+  hf_dataset_path: data/hsc_mmu
+  normalization:
+    image:
+      linear:
+        min:
+        - 0
+        - 0
+        - 0
+        - 0
+        - 0
+        max:
+        - 2
+        - 2
+        - 2
+        - 2
+        - 2
 training:
   output_dir: scripts/cosmos_output
   nx: 32

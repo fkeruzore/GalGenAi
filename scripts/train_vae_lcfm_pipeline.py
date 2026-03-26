@@ -3,14 +3,17 @@ VAE + LCFM Training Pipeline
 
 Demonstrates the complete workflow for training generative
 models on galaxy images:
-1. Train a VAE on HSC galaxy data
+1. Train a VAE on galaxy data (COSMOS or HSC-MMU)
 2. Extract and save the frozen encoder
 3. Train an LCFM model using the encoder
 
 Run with:
-    uv run python scripts/train_vae_lcfm_pipeline.py
+    uv run python scripts/train_vae_lcfm_pipeline.py --dataset cosmos
+    uv run python scripts/train_vae_lcfm_pipeline.py --dataset hsc_mmu
+    uv run python scripts/train_vae_lcfm_pipeline.py --dataset hsc_mmu --skip-vae
 """
 
+import argparse
 import torch
 from pathlib import Path
 from datasets import load_from_disk
@@ -25,234 +28,375 @@ from galgenai.training import (
 )
 
 from galgenai.data.hsc import get_dataset_and_loaders
+from galgenai.data.cosmos_dataset import load_fits_dataset, make_loaders
+from galgenai.data.normalization import (
+    get_image_norm_fn,
+    save_image_norm_stats,
+)
 
 from galgenai import get_device
+from galgenai.config import load_config
 
 
-# Get the best available device
-device = get_device()
-print(f"Using device: {device}")
-
-# Create output directory structure
-output_dir = Path("./pipeline_output")
-output_dir.mkdir(exist_ok=True)
-print(f"Output directory: {output_dir.absolute()}")
-
-# Set to False to skip VAE training and load from existing checkpoint
-train_vae = True
-
-
-# =================================================================
-# ----  DATA LOADING  --------------------------------------------
-# =================================================================
-
-print("\n" + "=" * 60)
-print("LOADING DATA")
-print("=" * 60)
-
-# Path to the HSC mini dataset (HuggingFace format)
-data_path = "./data/hsc_mmu/"
-
-# Load the raw HuggingFace dataset
-dataset_raw = load_from_disk(data_path)
-print(f"Loaded dataset from: {data_path}")
-
-# Create PyTorch dataset and data loaders
-# - nx=64: crop images to 64x64 pixels
-# - batch_size=32: small batch for demo
-# - Returns (flux, ivar, mask) tuples per batch
-dataset, train_loader, val_loader = get_dataset_and_loaders(
-    dataset_raw,
-    nx=64,  # Crop size (64x64 pixels)
-    batch_size=32,  # Batch size for training
-    num_workers=0,
-)
-print(f"Dataset size: {len(dataset)} samples")
-print(f"Train batches: {len(train_loader)}, Val batches: {len(val_loader)}")
-
-
-# =================================================================
-# ----  VAE TRAINING  ---------------------------------------------
-# =================================================================
-
-encoder_path = output_dir / "encoder.pt"
-
-if train_vae:
-    print("\n" + "=" * 60)
-    print("TRAINING VAE")
-    print("=" * 60)
-
-    # Create VAE model
-    # - in_channels=5: HSC has 5 photometric bands (g, r, i, z, y)
-    # - latent_dim=32: dimension of the latent space
-    # - input_size=64: matches our crop size
-    vae = VAE(
-        in_channels=5,
-        latent_dim=32,
-        input_size=64,
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Train VAE + LCFM pipeline",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    print(f"VAE parameters: {sum(p.numel() for p in vae.parameters()):,}")
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        required=True,
+        choices=["cosmos", "hsc_mmu"],
+        help="Dataset to use: 'cosmos' or 'hsc_mmu'",
+    )
+    parser.add_argument(
+        "--skip-vae",
+        action="store_true",
+        help="Skip VAE training and load from existing checkpoint",
+    )
+    return parser.parse_args()
 
-    # Configure VAE training
-    # - num_epochs=5: quick demo training
-    # - reconstruction_loss_fn="masked_weighted_mse": uses inverse
-    #   variance weights and masks for bad pixels/noise
-    # - beta=1.0: standard VAE
-    vae_config = VAETrainingConfig(
-        num_epochs=64,
-        learning_rate=1e-3,
-        reconstruction_loss_fn="masked_weighted_mse",
-        beta=1.0,
-        output_dir=str(output_dir / "vae"),
-        save_every=8,  # Save checkpoint every 5 epochs
+
+if __name__ == '__main__':
+    # Parse command-line arguments
+    args = parse_args()
+
+    # Get the best available device
+    device = get_device()
+    print(f"Using device: {device}")
+
+    # Load configuration
+    cfg = load_config()
+    print("Loaded configuration from galgenai_config.yaml")
+    
+    # Select dataset configuration based on argument
+    dataset_type = args.dataset
+    train_vae = not args.skip_vae
+    
+    print(f"Dataset type: {dataset_type}")
+    
+    # ------------------------------------------------------------------
+    # Load all required config values
+    # ------------------------------------------------------------------
+    try:
+        # Get dataset-specific configuration
+        if dataset_type == "cosmos":
+            dataset_cfg = cfg["cosmos"]
+            data_path = dataset_cfg["hf_dataset_path"]
+            num_workers = dataset_cfg["num_workers"]
+            train_ratio = dataset_cfg["train_ratio"]
+            val_ratio = dataset_cfg["val_ratio"]
+            split_seed = dataset_cfg["split_seed"]
+        elif dataset_type == "hsc_mmu":
+            dataset_cfg = cfg["hsc_mmu"]
+            data_path = dataset_cfg["hf_dataset_path"]
+            num_workers = dataset_cfg["num_workers"]
+            train_ratio = dataset_cfg["train_ratio"]
+            val_ratio = dataset_cfg["val_ratio"]
+            split_seed = dataset_cfg["split_seed"]
+        else:
+            raise ValueError(f"Unknown dataset type: {dataset_type}")
+    
+        # Top-level sections
+        train_cfg = cfg["training"]
+        model_cfg = train_cfg["model"]
+        vae_cfg = train_cfg["vae"]
+        lcfm_cfg = train_cfg["lcfm"]
+        norm_cfg = dataset_cfg["normalization"]
+    
+        # Training config
+        output_dir = Path(train_cfg["output_dir"]) / "pipeline"
+        nx = train_cfg["nx"]
+        batch_size = train_cfg["batch_size"]
+    
+        # Model config
+        in_channels = model_cfg["in_channels"]
+        latent_dim = model_cfg["latent_dim"]
+        base_channels = model_cfg["base_channels"]
+    
+        # VAE config
+        vae_epochs = vae_cfg["epochs"]
+        vae_lr = vae_cfg["lr"]
+        vae_beta = vae_cfg["beta"]
+        vae_save_every = vae_cfg["save_every"]
+        vae_validate_every = vae_cfg["validate_every"]
+        vae_image_norm_type = vae_cfg["norm_type"]
+        vae_reconstruction_loss_fn = vae_cfg["reconstruction_loss_fn"]
+    
+        # LCFM config
+        lcfm_steps = lcfm_cfg["steps"]
+        lcfm_lr = lcfm_cfg["lr"]
+        lcfm_warmup = lcfm_cfg["warmup"]
+        lcfm_beta = lcfm_cfg["beta"]
+        lcfm_sample_every = lcfm_cfg["sample_every"]
+        lcfm_validate_every = lcfm_cfg["validate_every"]
+        lcfm_save_every = lcfm_cfg["save_every"]
+        lcfm_log_every = lcfm_cfg["log_every"]
+    
+    except KeyError as e:
+        raise ValueError(
+            f"Missing required config value: {e}. "
+            "Please ensure all required values are present in the config file."
+        )
+    
+    # Create output directory structure
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Output directory: {output_dir.absolute()}")
+    
+    
+    # =================================================================
+    # ----  NORMALIZATION SETUP  -------------------------------------
+    # =================================================================
+    
+    print("\n" + "=" * 60)
+    print("SETTING UP NORMALIZATION")
+    print("=" * 60)
+    
+    print(f"Image normalisation: {vae_image_norm_type}")
+    image_norm_fn, norm_stats = get_image_norm_fn(
+        img_norm_type=vae_image_norm_type,
+        config=norm_cfg["image"],
+    )
+    
+    # Save normalization stats
+    norm_stats_save_path = output_dir / "norm_stats.yaml"
+    save_image_norm_stats(norm_stats, norm_stats_save_path)
+    print(f"Normalization stats saved to: {norm_stats_save_path}")
+    
+    
+    # =================================================================
+    # ----  DATA LOADING  --------------------------------------------
+    # =================================================================
+    
+    print("\n" + "=" * 60)
+    print("LOADING DATA")
+    print("=" * 60)
+    
+    if dataset_type == "cosmos":
+        catalog_cols = dataset_cfg["catalog_columns"]
+        mag_cols = catalog_cols["mag_cols"]
+        redshift_col = catalog_cols["redshift_col"]
+    
+        dataset_raw = load_fits_dataset(
+            data_dir=data_path,
+            metadata_file="metadata.csv",
+            format="torch",
+            filter_invalid_mags=True,
+            mag_sentinel=dataset_cfg["mag_sentinel"],
+            mag_cols=mag_cols,
+            filter_invalid_redshift=True,
+            redshift_sentinel=dataset_cfg["redshift_sentinel"],
+            redshift_col=redshift_col,
+        )
+        print(f"Loaded COSMOS dataset from: {data_path}")
+    
+        # Create PyTorch dataset and data loaders for COSMOS
+        train_loader, val_loader, test_loader = make_loaders(
+            dataset_raw,
+            nx=nx,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
+            random_seed=split_seed,
+            image_norm_fn=image_norm_fn,
+            return_aux_data=True,
+        )
+    
+        n_total = len(dataset_raw)
+        n_train = len(train_loader.dataset)
+        n_val = len(val_loader.dataset)
+        print(f"Dataset sizes: {n_train} train / {n_val} val (total: {n_total})")
+        print(f"Train batches: {len(train_loader)}, Val batches: {len(val_loader)}")
+    
+    elif dataset_type == "hsc_mmu":
+        # Load HSC-MMU HuggingFace dataset
+        dataset_raw = load_from_disk(data_path)
+        print(f"Loaded HSC-MMU dataset from: {data_path}")
+    
+        # Create PyTorch dataset and data loaders for HSC-MMU
+        dataset, train_loader, val_loader = get_dataset_and_loaders(
+            dataset_raw,
+            nx=nx,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            image_norm_fn=image_norm_fn,
+        )
+        print(f"Dataset size: {len(dataset)} samples")
+        print(f"Train batches: {len(train_loader)}, Val batches: {len(val_loader)}")
+    
+    
+    # =================================================================
+    # ----  VAE TRAINING  ---------------------------------------------
+    # =================================================================
+    
+    encoder_path = output_dir / "encoder.pt"
+    
+    if train_vae:
+        print("\n" + "=" * 60)
+        print("TRAINING VAE")
+        print("=" * 60)
+    
+        # Create VAE model
+        vae = VAE(
+            in_channels=in_channels,
+            latent_dim=latent_dim,
+            input_size=nx,
+        )
+        print(f"VAE parameters: {sum(p.numel() for p in vae.parameters()):,}")
+    
+        # Configure VAE training
+        vae_config = VAETrainingConfig(
+            num_epochs=vae_epochs,
+            learning_rate=vae_lr,
+            reconstruction_loss_fn=vae_reconstruction_loss_fn,
+            beta=vae_beta,
+            output_dir=str(output_dir / "vae"),
+            save_every=vae_save_every,
+            validate_every=vae_validate_every,
+            device=str(device),
+        )
+    
+        # Create trainer and run training
+        vae_trainer = VAETrainer(
+            model=vae,
+            train_loader=train_loader,
+            config=vae_config,
+            val_loader=val_loader,
+        )
+        vae_trainer.train()
+    
+        print("VAE training complete!")
+        print(f"Checkpoints saved to: {output_dir / 'vae' / 'checkpoints'}")
+    
+        # =============================================================
+        # ----  EXTRACT & SAVE ENCODER  -------------------------------
+        # =============================================================
+    
+        print("\n" + "=" * 60)
+        print("SAVING FROZEN ENCODER")
+        print("=" * 60)
+    
+        # The VAE has separate encoder and decoder components
+        # We save just the encoder for use with LCFM
+        torch.save(vae_trainer.model.encoder.state_dict(), encoder_path)
+        print(f"Encoder saved to: {encoder_path}")
+    
+        # Clean up VAE to free memory before LCFM training
+        del vae, vae_trainer
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    
+    else:
+        print("\n" + "=" * 60)
+        print("LOADING VAE FROM CHECKPOINT (train_vae=False)")
+        print("=" * 60)
+    
+        # Load trained VAE weights from best checkpoint
+        vae_ckpt_path = output_dir / "vae" / "checkpoints" / "best.pt"
+        vae = VAE(
+            in_channels=in_channels,
+            latent_dim=latent_dim,
+            input_size=nx,
+        )
+        checkpoint = torch.load(vae_ckpt_path, map_location=device)
+        vae.load_state_dict(checkpoint["model_state_dict"])
+        print(f"Loaded VAE from: {vae_ckpt_path}")
+    
+        # Save the encoder for LCFM
+        torch.save(vae.encoder.state_dict(), encoder_path)
+        print(f"Encoder saved to: {encoder_path}")
+    
+        # Clean up VAE to free memory before LCFM training
+        del vae, checkpoint
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    
+    
+    # =================================================================
+    # ----  LCFM TRAINING  --------------------------------------------
+    # =================================================================
+    
+    print("\n" + "=" * 60)
+    print("TRAINING LCFM")
+    print("=" * 60)
+    
+    # Create a fresh encoder and load the trained weights
+    # Must match the VAE encoder architecture
+    encoder = VAEEncoder(
+        in_channels=in_channels,
+        latent_dim=latent_dim,
+        input_size=nx,
+    )
+    encoder.load_state_dict(torch.load(encoder_path, map_location=device))
+    encoder.to(device).eval()
+    print(f"Loaded encoder from: {encoder_path}")
+    
+    # Create LCFM model
+    lcfm = LCFM(
+        vae_encoder=encoder,
+        latent_dim=latent_dim,
+        in_channels=in_channels,
+        input_size=nx,
+        base_channels=base_channels,
+        beta=lcfm_beta,
+    ).to(device)
+    print(f"LCFM parameters: {sum(p.numel() for p in lcfm.parameters()):,}")
+    print("  (encoder backbone frozen; fc_mu/fc_logvar and flow network trained)")
+    
+    # Configure LCFM training
+    lcfm_config = LCFMTrainingConfig(
+        num_steps=lcfm_steps,
+        learning_rate=lcfm_lr,
+        warmup_steps=lcfm_warmup,
+        beta=lcfm_beta,
+        sample_every=lcfm_sample_every,
+        validate_every=lcfm_validate_every,
+        save_every=lcfm_save_every,
+        log_every=lcfm_log_every,
+        output_dir=str(output_dir / "lcfm"),
         device=str(device),
     )
-
+    
     # Create trainer and run training
-    vae_trainer = VAETrainer(
-        model=vae,
+    lcfm_trainer = LCFMTrainer(
+        model=lcfm,
         train_loader=train_loader,
-        config=vae_config,
+        config=lcfm_config,
         val_loader=val_loader,
     )
-    vae_trainer.train()
-
-    print("VAE training complete!")
-    print(f"Checkpoints saved to: {output_dir / 'vae' / 'checkpoints'}")
-
-    # =============================================================
-    # ----  EXTRACT & SAVE ENCODER  -------------------------------
-    # =============================================================
-
+    lcfm_trainer.train()
+    
+    print("LCFM training complete!")
+    print(f"Checkpoints saved to: {output_dir / 'lcfm' / 'checkpoints'}")
+    
+    
+    # =================================================================
+    # ----  SUMMARY  --------------------------------------------------
+    # =================================================================
+    
     print("\n" + "=" * 60)
-    print("SAVING FROZEN ENCODER")
+    print("TRAINING PIPELINE COMPLETE")
     print("=" * 60)
-
-    # The VAE has separate encoder and decoder components
-    # We save just the encoder for use with LCFM
-    torch.save(vae_trainer.model.encoder.state_dict(), encoder_path)
-    print(f"Encoder saved to: {encoder_path}")
-
-    # Clean up VAE to free memory before LCFM training
-    del vae, vae_trainer
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-else:
-    print("\n" + "=" * 60)
-    print("LOADING VAE FROM CHECKPOINT (train_vae=False)")
-    print("=" * 60)
-
-    # Load trained VAE weights from best checkpoint
-    vae_ckpt_path = output_dir / "vae" / "checkpoints" / "best.pt"
-    vae = VAE(
-        in_channels=5,
-        latent_dim=32,
-        input_size=64,
-    )
-    checkpoint = torch.load(vae_ckpt_path, map_location=device)
-    vae.load_state_dict(checkpoint["model_state_dict"])
-    print(f"Loaded VAE from: {vae_ckpt_path}")
-
-    # Save the encoder for LCFM
-    torch.save(vae.encoder.state_dict(), encoder_path)
-    print(f"Encoder saved to: {encoder_path}")
-
-    # Clean up VAE to free memory before LCFM training
-    del vae, checkpoint
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-
-# =================================================================
-# ----  LCFM TRAINING  --------------------------------------------
-# =================================================================
-
-print("\n" + "=" * 60)
-print("TRAINING LCFM")
-print("=" * 60)
-
-# Create a fresh encoder and load the trained weights
-# Must match the VAE encoder architecture
-encoder = VAEEncoder(
-    in_channels=5,
-    latent_dim=32,
-    input_size=64,
-)
-encoder.load_state_dict(torch.load(encoder_path, map_location=device))
-encoder.to(device).eval()
-print(f"Loaded encoder from: {encoder_path}")
-
-# Create LCFM model
-# - Encoder backbone frozen, fc_mu/fc_logvar remain trainable
-# - base_channels=64: U-Net base channel count
-# - beta=0.001: KL weight (low for scientific data)
-lcfm = LCFM(
-    vae_encoder=encoder,
-    latent_dim=32,
-    in_channels=5,
-    input_size=64,
-    base_channels=64,
-    beta=0.001,
-).to(device)
-print(f"LCFM parameters: {sum(p.numel() for p in lcfm.parameters()):,}")
-print("  (encoder backbone frozen; fc_mu/fc_logvar and flow network trained)")
-
-# Configure LCFM training
-# - num_steps=500: step-based training (not epochs)
-# - learning_rate=2e-4: standard for flow matching
-# - warmup_steps=50: linear LR warmup
-# - sample_every=250: generate samples periodically
-lcfm_config = LCFMTrainingConfig(
-    num_steps=5000,
-    learning_rate=2e-4,
-    warmup_steps=50,
-    beta=0.001,
-    sample_every=500,
-    validate_every=250,
-    save_every=250,
-    log_every=500,
-    output_dir=str(output_dir / "lcfm"),
-    device=str(device),
-)
-
-# Create trainer and run training
-lcfm_trainer = LCFMTrainer(
-    model=lcfm,
-    train_loader=train_loader,
-    config=lcfm_config,
-    val_loader=val_loader,
-)
-lcfm_trainer.train()
-
-print("LCFM training complete!")
-print(f"Checkpoints saved to: {output_dir / 'lcfm' / 'checkpoints'}")
-
-
-# =================================================================
-# ----  SUMMARY  --------------------------------------------------
-# =================================================================
-
-print("\n" + "=" * 60)
-print("TRAINING PIPELINE COMPLETE")
-print("=" * 60)
-vae_ckpt = output_dir / "vae" / "checkpoints"
-lcfm_ckpt = output_dir / "lcfm" / "checkpoints"
-best_model = lcfm_ckpt / "best.pt"
-
-print(f"""
-Output files:
-  - VAE checkpoints:  {vae_ckpt}
-  - Frozen encoder:   {encoder_path}
-  - LCFM checkpoints: {lcfm_ckpt}
-  - LCFM samples:     {output_dir / "lcfm" / "samples"}
-
-To load the trained LCFM model:
-    encoder = VAEEncoder(in_channels=5, latent_dim=32,
-                         input_size=64)
-    encoder.load_state_dict(torch.load("{encoder_path}"))
-    lcfm = LCFM(encoder, latent_dim=32, in_channels=5, input_size=64)
-    lcfm.load_state_dict(
-        torch.load("{best_model}")["model_state_dict"]
-    )
-""")
+    vae_ckpt = output_dir / "vae" / "checkpoints"
+    lcfm_ckpt = output_dir / "lcfm" / "checkpoints"
+    best_model = lcfm_ckpt / "best.pt"
+    
+    print(f"""
+    Output files:
+      - VAE checkpoints:  {vae_ckpt}
+      - Frozen encoder:   {encoder_path}
+      - LCFM checkpoints: {lcfm_ckpt}
+      - LCFM samples:     {output_dir / "lcfm" / "samples"}
+    
+    To load the trained LCFM model:
+        encoder = VAEEncoder(in_channels={in_channels}, latent_dim={latent_dim},
+                             input_size={nx})
+        encoder.load_state_dict(torch.load("{encoder_path}"))
+        lcfm = LCFM(encoder, latent_dim={latent_dim}, in_channels={in_channels},
+                    input_size={nx}, base_channels={base_channels})
+        lcfm.load_state_dict(
+            torch.load("{best_model}")["model_state_dict"]
+        )
+    """)

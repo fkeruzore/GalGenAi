@@ -63,7 +63,7 @@ def load_fits_dataset(
     redshift_sentinel : float
         Sentinel value indicating missing redshift (default: -99.0).
     redshift_col : str
-        Name of the redshift column in metadata (default: "photz").
+        Name of the redshift column in metadata. Required if filter_invalid_redshift is True.
 
     Returns:
     --------
