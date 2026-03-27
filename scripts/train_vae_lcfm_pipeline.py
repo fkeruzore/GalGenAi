@@ -22,9 +22,9 @@ from galgenai.models import VAE, VAEEncoder, LCFM
 
 from galgenai.training import (
     VAETrainer,
-    VAETrainingConfig,
     LCFMTrainer,
-    LCFMTrainingConfig,
+    load_vae_training_config,
+    load_lcfm_training_config,
 )
 
 from galgenai.data.hsc import get_dataset_and_loaders
@@ -102,37 +102,24 @@ if __name__ == '__main__':
         train_cfg = cfg["training"]
         model_cfg = train_cfg["model"]
         vae_cfg = train_cfg["vae"]
-        lcfm_cfg = train_cfg["lcfm"]
         norm_cfg = dataset_cfg["normalization"]
-    
+
         # Training config
         output_dir = Path(train_cfg["output_dir"]) / "pipeline"
         nx = train_cfg["nx"]
         batch_size = train_cfg["batch_size"]
-    
+
         # Model config
         in_channels = model_cfg["in_channels"]
         latent_dim = model_cfg["latent_dim"]
         base_channels = model_cfg["base_channels"]
-    
-        # VAE config
-        vae_epochs = vae_cfg["epochs"]
-        vae_lr = vae_cfg["lr"]
-        vae_beta = vae_cfg["beta"]
-        vae_save_every = vae_cfg["save_every"]
-        vae_validate_every = vae_cfg["validate_every"]
+
+        # VAE config (only non-training params)
         vae_image_norm_type = vae_cfg["norm_type"]
-        vae_reconstruction_loss_fn = vae_cfg["reconstruction_loss_fn"]
-    
-        # LCFM config
-        lcfm_steps = lcfm_cfg["steps"]
-        lcfm_lr = lcfm_cfg["lr"]
-        lcfm_warmup = lcfm_cfg["warmup"]
+
+        # LCFM config (model parameter - beta is passed to LCFM constructor)
+        lcfm_cfg = train_cfg["lcfm"]
         lcfm_beta = lcfm_cfg["beta"]
-        lcfm_sample_every = lcfm_cfg["sample_every"]
-        lcfm_validate_every = lcfm_cfg["validate_every"]
-        lcfm_save_every = lcfm_cfg["save_every"]
-        lcfm_log_every = lcfm_cfg["log_every"]
     
     except KeyError as e:
         raise ValueError(
@@ -246,17 +233,8 @@ if __name__ == '__main__':
         )
         print(f"VAE parameters: {sum(p.numel() for p in vae.parameters()):,}")
     
-        # Configure VAE training
-        vae_config = VAETrainingConfig(
-            num_epochs=vae_epochs,
-            learning_rate=vae_lr,
-            reconstruction_loss_fn=vae_reconstruction_loss_fn,
-            beta=vae_beta,
-            output_dir=str(output_dir / "vae"),
-            save_every=vae_save_every,
-            validate_every=vae_validate_every,
-            device=str(device),
-        )
+        # Configure VAE training (loads from config)
+        vae_config = load_vae_training_config()
     
         # Create trainer and run training
         vae_trainer = VAETrainer(
@@ -345,19 +323,8 @@ if __name__ == '__main__':
     print(f"LCFM parameters: {sum(p.numel() for p in lcfm.parameters()):,}")
     print("  (encoder backbone frozen; fc_mu/fc_logvar and flow network trained)")
     
-    # Configure LCFM training
-    lcfm_config = LCFMTrainingConfig(
-        num_steps=lcfm_steps,
-        learning_rate=lcfm_lr,
-        warmup_steps=lcfm_warmup,
-        beta=lcfm_beta,
-        sample_every=lcfm_sample_every,
-        validate_every=lcfm_validate_every,
-        save_every=lcfm_save_every,
-        log_every=lcfm_log_every,
-        output_dir=str(output_dir / "lcfm"),
-        device=str(device),
-    )
+    # Configure LCFM training (loads from config)
+    lcfm_config = load_lcfm_training_config()
     
     # Create trainer and run training
     lcfm_trainer = LCFMTrainer(

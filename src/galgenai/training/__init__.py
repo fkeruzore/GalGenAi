@@ -7,6 +7,9 @@ from .config import (
     CNFTrainingConfig,
     LCFMTrainingConfig,
     VAETrainingConfig,
+    load_cnf_training_config,
+    load_lcfm_training_config,
+    load_vae_training_config,
 )
 from .lcfm_trainer import LCFMTrainer
 from .utils import extract_batch_data, vae_loss
@@ -18,6 +21,10 @@ __all__ = [
     "VAETrainingConfig",
     "LCFMTrainingConfig",
     "CNFTrainingConfig",
+    # Config loaders
+    "load_vae_training_config",
+    "load_lcfm_training_config",
+    "load_cnf_training_config",
     # Trainers
     "BaseTrainer",
     "VAETrainer",

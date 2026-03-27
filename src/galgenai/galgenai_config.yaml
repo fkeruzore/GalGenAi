@@ -128,21 +128,25 @@ training:
   lcfm:
     steps: 100000
     lr: 0.0002
-    warmup: 1000
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+    warmup: 100
     beta: 0.001
-    sample_every: 5000
+    sample_every: 500
+    num_sample_images: 16
     validate_every: 500
     save_every: 10000
     log_every: 100
   cnf:
     steps: 20000
     lr: 0.0001
+    weight_decay: 0.01
+    max_grad_norm: 1.0
     warmup: 1000
     num_blocks: 8
     hidden_dim: 256
-    sample_every: 5000
-    validate_every: 2000
-    save_every: 10000
+    num_sample_latents: 64
+    log_every: 100
     condition_cols:
     - mag_model_hsc-g
     - mag_model_hsc-r

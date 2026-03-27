@@ -41,11 +41,11 @@ from galgenai.data.cosmos_dataset import (
     precompute_latents,
 )
 from galgenai.models import VAE, ConditionalNormalizingFlow
-from galgenai.training import (                                                                                                      
-    CNFTrainer,                                                                                                                     
-    CNFTrainingConfig,                                                                                                              
-    VAETrainer,                                                                                                                     
-    VAETrainingConfig,                                                                                                              
+from galgenai.training import (
+    CNFTrainer,
+    VAETrainer,
+    load_vae_training_config,
+    load_cnf_training_config,
 )   
 
 
@@ -101,25 +101,13 @@ def main():
         in_channels = model_cfg["in_channels"]
         latent_dim = model_cfg["latent_dim"]
 
-        # VAE config
-        vae_epochs = vae_cfg["epochs"]
-        vae_lr = vae_cfg["lr"]
-        vae_beta = vae_cfg["beta"]
-        vae_save_every = vae_cfg["save_every"]
-        vae_validate_every = vae_cfg["validate_every"]
+        # VAE config (only non-training params)
         vae_image_norm_type = vae_cfg["norm_type"]
-        vae_reconstruction_loss_fn = vae_cfg["reconstruction_loss_fn"]
 
-        # CNF config
+        # CNF config (only non-training params)
         condition_cols = cnf_cfg["condition_cols"]
         cnf_num_blocks = cnf_cfg["num_blocks"]
         cnf_hidden_dim = cnf_cfg["hidden_dim"]
-        cnf_steps = cnf_cfg["steps"]
-        cnf_lr = cnf_cfg["lr"]
-        cnf_warmup = cnf_cfg["warmup"]
-        cnf_sample_every = cnf_cfg["sample_every"]
-        cnf_validate_every = cnf_cfg["validate_every"]
-        cnf_save_every = cnf_cfg["save_every"]
 
     except KeyError as e:
         raise ValueError(
@@ -249,16 +237,8 @@ def main():
         )
         print(f"VAE parameters: {sum(p.numel() for p in vae.parameters()):,}")
 
-        vae_config = VAETrainingConfig(
-            num_epochs=vae_epochs,
-            learning_rate=vae_lr,
-            reconstruction_loss_fn=vae_reconstruction_loss_fn,
-            beta=vae_beta,
-            output_dir=str(output_dir / "vae"),
-            save_every=vae_save_every,
-            validate_every=vae_validate_every,
-            device=str(device),
-        )
+        # Configure VAE training (loads from config)
+        vae_config = load_vae_training_config()
 
         vae_trainer = VAETrainer(
             model=vae,
@@ -365,16 +345,8 @@ def main():
     print(f"  hidden_dim    : {cnf_hidden_dim}")
 
     # ---- Train CNF -----------------------------------------------
-    cnf_config = CNFTrainingConfig(
-        num_steps=cnf_steps,
-        learning_rate=cnf_lr,
-        warmup_steps=cnf_warmup,
-        sample_every=cnf_sample_every,
-        validate_every=cnf_validate_every,
-        save_every=cnf_save_every,
-        output_dir=str(output_dir / "cnf"),
-        device=str(device),
-    )
+    # Configure CNF training (loads from config)
+    cnf_config = load_cnf_training_config()
 
     cnf_trainer = CNFTrainer(
         model=cnf,
