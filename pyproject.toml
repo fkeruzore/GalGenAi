@@ -15,10 +15,10 @@ dependencies = [
     "torchdiffeq>=0.2.5",
     "torchvision>=0.24.0",
     "tqdm>=4.67.1",
-    "yaml",
     "astropy",
     "galsim",
     "surveycodex",
+    "pyyaml>=6.0.3",
 ]
 
 [project.scripts]
