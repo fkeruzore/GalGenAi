@@ -12,7 +12,14 @@ from .config import (
     load_vae_training_config,
 )
 from .lcfm_trainer import LCFMTrainer
-from .utils import extract_batch_data, vae_loss
+from .utils import (
+    align_loss,
+    decorr_loss,
+    disentangled_kl,
+    dlcfm_disentanglement_loss,
+    extract_batch_data,
+    vae_loss,
+)
 from .vae_trainer import VAETrainer
 
 __all__ = [
@@ -33,4 +40,8 @@ __all__ = [
     # Utilities
     "vae_loss",
     "extract_batch_data",
+    "align_loss",
+    "decorr_loss",
+    "disentangled_kl",
+    "dlcfm_disentanglement_loss",
 ]
