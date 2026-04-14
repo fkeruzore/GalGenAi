@@ -30,6 +30,39 @@ def extract_batch_data(
     return data, ivar, mask
 
 
+def extract_dlcfm_batch_data(
+    batch, device: torch.device
+) -> Tuple[
+    torch.Tensor,
+    Optional[torch.Tensor],
+    Optional[torch.Tensor],
+    Optional[torch.Tensor],
+]:
+    """
+    Extract data from batch for DL-CFM training.
+
+    Args:
+        batch: Either a tensor, tuple of (flux, ivar, mask), or
+            tuple of (flux, ivar, mask, aux_vars).
+        device: Device to move tensors to.
+
+    Returns:
+        Tuple of (data, ivar, mask, aux_vars). ivar, mask, and
+        aux_vars may be None.
+    """
+    if isinstance(batch, (tuple, list)):
+        data = batch[0].to(device)
+        ivar = batch[1].to(device) if len(batch) > 1 else None
+        mask = batch[2].to(device) if len(batch) > 2 else None
+        aux_vars = batch[3].to(device) if len(batch) > 3 else None
+    else:
+        data = batch.to(device)
+        ivar = None
+        mask = None
+        aux_vars = None
+    return data, ivar, mask, aux_vars
+
+
 def vae_loss(
     reconstruction: torch.Tensor,
     x: torch.Tensor,
@@ -91,9 +124,7 @@ def vae_loss(
 # -------------------------------------------------------------------
 
 
-def _batch_corr_matrix(
-    v: torch.Tensor, w: torch.Tensor
-) -> torch.Tensor:
+def _batch_corr_matrix(v: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
     """Pearson correlation matrix between columns of v and w.
 
     Args:
@@ -114,9 +145,7 @@ def _batch_corr_matrix(
     return (v_normed.T @ w_normed) / (n - 1)
 
 
-def _polynomial_lift(
-    x: torch.Tensor, K: int
-) -> torch.Tensor:
+def _polynomial_lift(x: torch.Tensor, K: int) -> torch.Tensor:
     """Elementwise polynomial lift up to degree K.
 
     Args:
@@ -271,9 +300,7 @@ def disentangled_kl(
 
     # Build prior log-variance: log(tau^2) for guided, 0 for residual
     log_sigma0_sq = torch.zeros(d_z, device=mu.device)
-    log_sigma0_sq[:n_aux] = torch.log(
-        torch.tensor(tau_sq, device=mu.device)
-    )
+    log_sigma0_sq[:n_aux] = torch.log(torch.tensor(tau_sq, device=mu.device))
     # Sigma_0 diagonal: tau^2 for guided, 1 for residual
     sigma0_sq = log_sigma0_sq.exp()
 
