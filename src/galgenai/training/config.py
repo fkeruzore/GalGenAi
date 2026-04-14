@@ -1,8 +1,8 @@
 """Training configuration dataclasses."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, List, Optional
 
 from galgenai.config import load_config
 
@@ -89,6 +89,20 @@ class CNFTrainingConfig(BaseTrainingConfig):
 
     # Validation
     validate_every: int = 500
+
+
+@dataclass
+class DLCFMTrainingConfig(LCFMTrainingConfig):
+    """DL-CFM training configuration (LCFM + disentanglement)."""
+
+    # DL-CFM disentanglement hyperparameters
+    dlcfm_beta: float = 8e-5
+    lambda1: float = 8e-2
+    lambda2: float = 1e-2
+    K: int = 2
+    tau_sq: Optional[float] = None
+    n_aux: int = 6
+    condition_cols: List[str] = field(default_factory=list)
 
 
 # ============================================================================
@@ -212,6 +226,61 @@ def load_cnf_training_config(config_path: Optional[str] = None) -> CNFTrainingCo
         max_grad_norm=cnf_config["max_grad_norm"],
         log_every=cnf_config["log_every"],
         save_every=cnf_config["save_every"],
+        output_dir=str(output_dir),
+        checkpoint_path=None,
+        device=None,
+        scheduler_factory=None,
+    )
+
+
+def load_dlcfm_training_config(
+    config_path: Optional[str] = None,
+) -> DLCFMTrainingConfig:
+    """
+    Load DL-CFM training config from YAML file.
+
+    Parameters
+    ----------
+    config_path : str, optional
+        Path to config file. If None, uses default galgenai_config.yaml
+
+    Returns
+    -------
+    DLCFMTrainingConfig
+        Configuration instance loaded from file
+    """
+    config = load_config(config_path)
+    training_config = config["training"]
+    dlcfm_config = training_config["dlcfm"]
+
+    # Automatically append /dlcfm to output directory
+    output_dir = Path(training_config["output_dir"]) / "dlcfm"
+
+    condition_cols = dlcfm_config.get("condition_cols", [])
+    n_aux = len(condition_cols)
+
+    return DLCFMTrainingConfig(
+        # DL-CFM-specific
+        dlcfm_beta=dlcfm_config["dlcfm_beta"],
+        lambda1=dlcfm_config["lambda1"],
+        lambda2=dlcfm_config["lambda2"],
+        K=dlcfm_config["K"],
+        tau_sq=dlcfm_config.get("tau_sq"),
+        n_aux=n_aux,
+        condition_cols=condition_cols,
+        # LCFM-inherited
+        beta=0.0,
+        num_steps=dlcfm_config["steps"],
+        warmup_steps=dlcfm_config["warmup"],
+        sample_every=dlcfm_config["sample_every"],
+        num_sample_images=dlcfm_config["num_sample_images"],
+        validate_every=dlcfm_config["validate_every"],
+        # Base config
+        learning_rate=dlcfm_config["lr"],
+        weight_decay=dlcfm_config["weight_decay"],
+        max_grad_norm=dlcfm_config["max_grad_norm"],
+        log_every=dlcfm_config["log_every"],
+        save_every=dlcfm_config["save_every"],
         output_dir=str(output_dir),
         checkpoint_path=None,
         device=None,

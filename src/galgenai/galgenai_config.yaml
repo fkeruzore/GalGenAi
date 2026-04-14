@@ -154,4 +154,27 @@ training:
     - mag_model_hsc-z
     - mag_model_hsc-y
     - zfinal
+  dlcfm:
+    steps: 100000
+    lr: 0.0002
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+    warmup: 100
+    sample_every: 500
+    num_sample_images: 16
+    validate_every: 500
+    save_every: 10000
+    log_every: 100
+    dlcfm_beta: 8.0e-05
+    lambda1: 8.0e-02
+    lambda2: 1.0e-02
+    K: 2
+    tau_sq: null
+    condition_cols:
+    - mag_model_hsc-g
+    - mag_model_hsc-r
+    - mag_model_hsc-i
+    - mag_model_hsc-z
+    - mag_model_hsc-y
+    - zfinal
 
