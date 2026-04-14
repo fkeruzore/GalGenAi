@@ -1,4 +1,6 @@
 """Normalization and denormalization utilities for COSMOS galaxy images and magnitudes."""
+from __future__ import annotations
+
 from functools import partial
 
 from dataclasses import dataclass
