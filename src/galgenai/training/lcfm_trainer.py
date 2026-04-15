@@ -154,6 +154,24 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         self.model.train()
         return samples, train_images
 
+    def _pbar_postfix(self, loss_dict: Dict[str, float]) -> Dict[str, str]:
+        """Progress bar postfix. Override for custom display."""
+        return {
+            "loss": f"{loss_dict['total_loss']:.3e}",
+            "flow": f"{loss_dict['flow_loss']:.3e}",
+            "kl": f"{loss_dict['kl_loss']:.3e}",
+            "lr": f"{loss_dict['lr']:.3e}",
+        }
+
+    def _val_summary(self, val_metrics: Dict[str, float]) -> str:
+        """One-line validation summary. Override for custom format."""
+        return (
+            f"  Step {self.global_step} Val"
+            f" - Flow: {val_metrics['val_flow_loss']:.3e}"
+            f", KL: {val_metrics['val_kl_loss']:.3e}"
+            f", Total: {val_metrics['val_total_loss']:.3e}"
+        )
+
     def train(self):
         """Main step-based training loop."""
         print(f"\nStarting training from step {self.global_step}")
@@ -161,7 +179,9 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
 
         self.model.train()
         if self.device.type == "mps":
-            print("torch.compile() skipped on MPS (inductor Metal backend bug)")
+            print(
+                "torch.compile() skipped on MPS (inductor Metal backend bug)"
+            )
         else:
             try:
                 self.model = torch.compile(self.model)
@@ -176,13 +196,12 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
 
         data_iter = iter(infinite_loader())
 
-        # Running averages for logging
-        running_flow_loss = 0.0
-        running_kl_loss = 0.0
-        running_total_loss = 0.0
+        # Discover metric keys from first step, then
+        # track running averages dynamically.
+        running: Dict[str, float] = {}
+        metric_keys: Optional[list] = None
         log_steps = 0
 
-        # Progress bar spanning all steps
         pbar = tqdm(
             total=self.config.num_steps,
             initial=self.global_step,
@@ -194,52 +213,35 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
             batch = next(data_iter)
             loss_dict = self._train_step(batch)
 
-            running_flow_loss += loss_dict["flow_loss"]
-            running_kl_loss += loss_dict["kl_loss"]
-            running_total_loss += loss_dict["total_loss"]
+            # Initialise running-average keys on first step
+            if metric_keys is None:
+                metric_keys = [k for k in loss_dict if k != "lr"]
+                running = {k: 0.0 for k in metric_keys}
+
+            for k in metric_keys:
+                running[k] += loss_dict[k]
             log_steps += 1
 
             self.global_step += 1
             pbar.update(1)
+            pbar.set_postfix(self._pbar_postfix(loss_dict))
 
-            # Update progress bar postfix with current metrics
-            pbar.set_postfix(
-                {
-                    "loss": f"{loss_dict['total_loss']:.3e}",
-                    "flow": f"{loss_dict['flow_loss']:.3e}",
-                    "kl": f"{loss_dict['kl_loss']:.3e}",
-                    "lr": f"{loss_dict['lr']:.3e}",
-                }
-            )
-
-            # Periodic logging (for metrics tracking, not display)
+            # Periodic logging
             if self.global_step % self.config.log_every == 0:
-                avg_metrics = {
-                    "flow_loss": running_flow_loss / log_steps,
-                    "kl_loss": running_kl_loss / log_steps,
-                    "total_loss": running_total_loss / log_steps,
-                    "lr": loss_dict["lr"],
-                }
+                avg_metrics = {k: running[k] / log_steps for k in metric_keys}
+                avg_metrics["lr"] = loss_dict["lr"]
 
                 # Validation
                 val_metrics = {}
                 if self.global_step % self.config.validate_every == 0:
                     val_metrics = self.validate()
                     if val_metrics:
-                        pbar.write(
-                            f"  Step {self.global_step} Val"
-                            f" - Flow: "
-                            f"{val_metrics['val_flow_loss']:.3e}"
-                            f", KL: "
-                            f"{val_metrics['val_kl_loss']:.3e}"
-                            f", Total: "
-                            f"{val_metrics['val_total_loss']:.3e}"
-                        )
+                        pbar.write(self._val_summary(val_metrics))
                         avg_metrics.update(val_metrics)
 
                 self._log_metrics(avg_metrics)
 
-                # Track best loss (use validation if available, otherwise training)
+                # Track best loss
                 if val_metrics:
                     current_loss = val_metrics["val_total_loss"]
                 else:
@@ -250,14 +252,12 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
                     loss_type = "val" if val_metrics else "train"
                     self.save_checkpoint(is_best=True)
                     pbar.write(
-                        f"  New best {loss_type} loss {current_loss:.4f} at step "
+                        f"  New best {loss_type} loss "
+                        f"{current_loss:.4f} at step "
                         f"{self.global_step} — saved best.pt"
                     )
 
-                # Reset running stats
-                running_flow_loss = 0.0
-                running_kl_loss = 0.0
-                running_total_loss = 0.0
+                running = {k: 0.0 for k in metric_keys}
                 log_steps = 0
 
             # Sample generation
@@ -287,5 +287,4 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         pbar.close()
         print("\nTraining complete!")
 
-        # Save final checkpoint (best.pt already saved whenever a new best was found)
         self.save_checkpoint()

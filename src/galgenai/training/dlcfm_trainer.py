@@ -5,12 +5,14 @@ from typing import Any, Dict, Optional
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
 from ..models.lcfm import LCFM
 from .config import DLCFMTrainingConfig
 from .lcfm_trainer import LCFMTrainer
-from .utils import dlcfm_disentanglement_loss, extract_dlcfm_batch_data
+from .utils import (
+    dlcfm_disentanglement_loss,
+    extract_dlcfm_batch_data,
+)
 
 
 class DLCFMTrainer(LCFMTrainer):
@@ -132,7 +134,6 @@ class DLCFMTrainer(LCFMTrainer):
 
             f, mu, logvar = self.model.encode(x1)
 
-            # Flow matching loss
             x0 = torch.randn_like(x1)
             t = torch.rand(batch_size, device=self.device)
             t_broadcast = t[:, None, None, None]
@@ -177,137 +178,23 @@ class DLCFMTrainer(LCFMTrainer):
         self.model.train()
         return {f"val_{k}": v / num_batches for k, v in totals.items()}
 
-    def train(self):
-        """Main step-based training loop with DL-CFM metrics."""
-        print(f"\nStarting training from step {self.global_step}")
-        print(f"Training for {self.config.num_steps - self.global_step} steps")
+    def _pbar_postfix(self, loss_dict: Dict[str, float]) -> Dict[str, str]:
+        """Progress bar postfix with disentanglement loss."""
+        return {
+            "loss": f"{loss_dict['total_loss']:.3e}",
+            "flow": f"{loss_dict['flow_loss']:.3e}",
+            "dis": (f"{loss_dict['disentanglement_loss']:.3e}"),
+            "lr": f"{loss_dict['lr']:.3e}",
+        }
 
-        self.model.train()
-        if self.device.type == "mps":
-            print(
-                "torch.compile() skipped on MPS (inductor Metal backend bug)"
-            )
-        else:
-            try:
-                self.model = torch.compile(self.model)
-                print("Model compiled with torch.compile()")
-            except RuntimeError:
-                print("torch.compile() not available, skipping")
-
-        def infinite_loader():
-            while True:
-                for batch in self.train_loader:
-                    yield batch
-
-        data_iter = iter(infinite_loader())
-
-        # Running averages for all DL-CFM components
-        component_keys = [
-            "flow_loss",
-            "kl",
-            "align",
-            "intra_decorr",
-            "inter_decorr",
-            "disentanglement_loss",
-            "total_loss",
-        ]
-        running = {k: 0.0 for k in component_keys}
-        log_steps = 0
-
-        pbar = tqdm(
-            total=self.config.num_steps,
-            initial=self.global_step,
-            desc="Training",
-            unit="step",
+    def _val_summary(self, val_metrics: Dict[str, float]) -> str:
+        """Validation summary with disentanglement loss."""
+        return (
+            f"  Step {self.global_step} Val"
+            f" - Flow: "
+            f"{val_metrics['val_flow_loss']:.3e}"
+            f", Dis: "
+            f"{val_metrics['val_disentanglement_loss']:.3e}"
+            f", Total: "
+            f"{val_metrics['val_total_loss']:.3e}"
         )
-
-        while self.global_step < self.config.num_steps:
-            batch = next(data_iter)
-            loss_dict = self._train_step(batch)
-
-            for k in component_keys:
-                running[k] += loss_dict[k]
-            log_steps += 1
-
-            self.global_step += 1
-            pbar.update(1)
-
-            pbar.set_postfix(
-                {
-                    "loss": f"{loss_dict['total_loss']:.3e}",
-                    "flow": f"{loss_dict['flow_loss']:.3e}",
-                    "dis": (f"{loss_dict['disentanglement_loss']:.3e}"),
-                    "lr": f"{loss_dict['lr']:.3e}",
-                }
-            )
-
-            if self.global_step % self.config.log_every == 0:
-                avg_metrics = {
-                    k: running[k] / log_steps for k in component_keys
-                }
-                avg_metrics["lr"] = loss_dict["lr"]
-
-                # Validation
-                val_metrics = {}
-                if self.global_step % self.config.validate_every == 0:
-                    val_metrics = self.validate()
-                    if val_metrics:
-                        pbar.write(
-                            f"  Step {self.global_step} Val"
-                            f" - Flow: "
-                            f"{val_metrics['val_flow_loss']:.3e}"
-                            f", Dis: "
-                            f"{val_metrics['val_disentanglement_loss']:.3e}"
-                            f", Total: "
-                            f"{val_metrics['val_total_loss']:.3e}"
-                        )
-                        avg_metrics.update(val_metrics)
-
-                self._log_metrics(avg_metrics)
-
-                if val_metrics:
-                    current_loss = val_metrics["val_total_loss"]
-                else:
-                    current_loss = avg_metrics["total_loss"]
-
-                if current_loss < self.best_loss:
-                    self.best_loss = current_loss
-                    loss_type = "val" if val_metrics else "train"
-                    self.save_checkpoint(is_best=True)
-                    pbar.write(
-                        f"  New best {loss_type} loss "
-                        f"{current_loss:.4f} at step "
-                        f"{self.global_step} — saved best.pt"
-                    )
-
-                running = {k: 0.0 for k in component_keys}
-                log_steps = 0
-
-            # Sample generation
-            if self.global_step % self.config.sample_every == 0:
-                pbar.write(f"Generating samples at step {self.global_step}...")
-                samples, conditioning = self.generate_samples(
-                    self.config.num_sample_images
-                )
-
-                sample_path = (
-                    self.output_dir
-                    / "samples"
-                    / f"samples_step_{self.global_step}.pt"
-                )
-                torch.save(
-                    {
-                        "samples": samples.cpu(),
-                        "conditioning": conditioning.cpu(),
-                    },
-                    sample_path,
-                )
-
-            # Checkpointing
-            if self.global_step % self.config.save_every == 0:
-                self.save_checkpoint()
-
-        pbar.close()
-        print("\nTraining complete!")
-
-        self.save_checkpoint()

@@ -41,6 +41,9 @@ def extract_dlcfm_batch_data(
     """
     Extract data from batch for DL-CFM training.
 
+    Delegates to :func:`extract_batch_data` for the first three
+    elements and adds the optional fourth (aux_vars).
+
     Args:
         batch: Either a tensor, tuple of (flux, ivar, mask), or
             tuple of (flux, ivar, mask, aux_vars).
@@ -50,16 +53,10 @@ def extract_dlcfm_batch_data(
         Tuple of (data, ivar, mask, aux_vars). ivar, mask, and
         aux_vars may be None.
     """
-    if isinstance(batch, (tuple, list)):
-        data = batch[0].to(device)
-        ivar = batch[1].to(device) if len(batch) > 1 else None
-        mask = batch[2].to(device) if len(batch) > 2 else None
-        aux_vars = batch[3].to(device) if len(batch) > 3 else None
-    else:
-        data = batch.to(device)
-        ivar = None
-        mask = None
-        aux_vars = None
+    data, ivar, mask = extract_batch_data(batch, device)
+    aux_vars = None
+    if isinstance(batch, (tuple, list)) and len(batch) > 3:
+        aux_vars = batch[3].to(device)
     return data, ivar, mask, aux_vars
 
 

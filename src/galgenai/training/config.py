@@ -110,7 +110,9 @@ class DLCFMTrainingConfig(LCFMTrainingConfig):
 # ============================================================================
 
 
-def load_vae_training_config(config_path: Optional[str] = None) -> VAETrainingConfig:
+def load_vae_training_config(
+    config_path: Optional[str] = None,
+) -> VAETrainingConfig:
     """
     Load VAE training config from YAML file.
 
@@ -150,41 +152,19 @@ def load_vae_training_config(config_path: Optional[str] = None) -> VAETrainingCo
     )
 
 
-def load_lcfm_training_config(config_path: Optional[str] = None) -> LCFMTrainingConfig:
-    """
-    Load LCFM training config from YAML file.
-
-    Parameters
-    ----------
-    config_path : str, optional
-        Path to config file. If None, uses default galgenai_config.yaml
-
-    Returns
-    -------
-    LCFMTrainingConfig
-        Configuration instance loaded from file
-    """
-    config = load_config(config_path)
-    training_config = config["training"]
-    lcfm_config = training_config["lcfm"]
-
-    # Automatically append /lcfm to output directory
-    output_dir = Path(training_config["output_dir"]) / "lcfm"
-
-    return LCFMTrainingConfig(
-        # LCFM-specific
-        beta=lcfm_config["beta"],
-        num_steps=lcfm_config["steps"],
-        warmup_steps=lcfm_config["warmup"],
-        sample_every=lcfm_config["sample_every"],
-        num_sample_images=lcfm_config["num_sample_images"],
-        validate_every=lcfm_config["validate_every"],
-        # Base config
-        learning_rate=lcfm_config["lr"],
-        weight_decay=lcfm_config["weight_decay"],
-        max_grad_norm=lcfm_config["max_grad_norm"],
-        log_every=lcfm_config["log_every"],
-        save_every=lcfm_config["save_every"],
+def _load_lcfm_base_fields(section: dict, output_dir: Path) -> dict:
+    """Extract shared LCFM/DL-CFM fields from a config section."""
+    return dict(
+        num_steps=section["steps"],
+        warmup_steps=section["warmup"],
+        sample_every=section["sample_every"],
+        num_sample_images=section["num_sample_images"],
+        validate_every=section["validate_every"],
+        learning_rate=section["lr"],
+        weight_decay=section["weight_decay"],
+        max_grad_norm=section["max_grad_norm"],
+        log_every=section["log_every"],
+        save_every=section["save_every"],
         output_dir=str(output_dir),
         checkpoint_path=None,
         device=None,
@@ -192,7 +172,22 @@ def load_lcfm_training_config(config_path: Optional[str] = None) -> LCFMTraining
     )
 
 
-def load_cnf_training_config(config_path: Optional[str] = None) -> CNFTrainingConfig:
+def load_lcfm_training_config(
+    config_path: Optional[str] = None,
+) -> LCFMTrainingConfig:
+    """Load LCFM training config from YAML file."""
+    config = load_config(config_path)
+    training_config = config["training"]
+    lcfm_config = training_config["lcfm"]
+    output_dir = Path(training_config["output_dir"]) / "lcfm"
+
+    fields = _load_lcfm_base_fields(lcfm_config, output_dir)
+    return LCFMTrainingConfig(beta=lcfm_config["beta"], **fields)
+
+
+def load_cnf_training_config(
+    config_path: Optional[str] = None,
+) -> CNFTrainingConfig:
     """
     Load CNF training config from YAML file.
 
@@ -236,53 +231,22 @@ def load_cnf_training_config(config_path: Optional[str] = None) -> CNFTrainingCo
 def load_dlcfm_training_config(
     config_path: Optional[str] = None,
 ) -> DLCFMTrainingConfig:
-    """
-    Load DL-CFM training config from YAML file.
-
-    Parameters
-    ----------
-    config_path : str, optional
-        Path to config file. If None, uses default galgenai_config.yaml
-
-    Returns
-    -------
-    DLCFMTrainingConfig
-        Configuration instance loaded from file
-    """
+    """Load DL-CFM training config from YAML file."""
     config = load_config(config_path)
     training_config = config["training"]
     dlcfm_config = training_config["dlcfm"]
-
-    # Automatically append /dlcfm to output directory
     output_dir = Path(training_config["output_dir"]) / "dlcfm"
 
     condition_cols = dlcfm_config.get("condition_cols", [])
-    n_aux = len(condition_cols)
-
+    fields = _load_lcfm_base_fields(dlcfm_config, output_dir)
     return DLCFMTrainingConfig(
-        # DL-CFM-specific
+        beta=0.0,
         dlcfm_beta=dlcfm_config["dlcfm_beta"],
         lambda1=dlcfm_config["lambda1"],
         lambda2=dlcfm_config["lambda2"],
         K=dlcfm_config["K"],
         tau_sq=dlcfm_config.get("tau_sq"),
-        n_aux=n_aux,
+        n_aux=len(condition_cols),
         condition_cols=condition_cols,
-        # LCFM-inherited
-        beta=0.0,
-        num_steps=dlcfm_config["steps"],
-        warmup_steps=dlcfm_config["warmup"],
-        sample_every=dlcfm_config["sample_every"],
-        num_sample_images=dlcfm_config["num_sample_images"],
-        validate_every=dlcfm_config["validate_every"],
-        # Base config
-        learning_rate=dlcfm_config["lr"],
-        weight_decay=dlcfm_config["weight_decay"],
-        max_grad_norm=dlcfm_config["max_grad_norm"],
-        log_every=dlcfm_config["log_every"],
-        save_every=dlcfm_config["save_every"],
-        output_dir=str(output_dir),
-        checkpoint_path=None,
-        device=None,
-        scheduler_factory=None,
+        **fields,
     )
