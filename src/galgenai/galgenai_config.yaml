@@ -111,7 +111,7 @@ hsc_mmu:
         - 2
 training:
   output_dir: scripts/cosmos_output
-  nx: 32
+  nx: 16
   batch_size: 64
   model:
     in_channels: 5
@@ -120,7 +120,10 @@ training:
   vae:
     epochs: 30
     lr: 0.0001
+    weight_decay: 0.0
+    max_grad_norm: 1.0
     beta: 1.0e-08
+    log_every: 1
     save_every: 8
     validate_every: 5
     norm_type: arcsinh
@@ -145,8 +148,11 @@ training:
     warmup: 1000
     num_blocks: 8
     hidden_dim: 256
+    sample_every: 5000
     num_sample_latents: 64
+    validate_every: 500
     log_every: 100
+    save_every: 10000
     condition_cols:
     - mag_model_hsc-g
     - mag_model_hsc-r
