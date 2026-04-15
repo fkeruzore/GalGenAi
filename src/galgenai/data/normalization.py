@@ -228,70 +228,6 @@ def linear_denorm(x: torch.Tensor, stats: LinearNormStats) -> torch.Tensor:
     return x * (max_ - min_) + min_
 
 
-def load_stats_from_config(
-    norm_config: dict,
-    image: bool = True,
-    norm_type: str = "arcsinh"
-) -> LinearNormStats | ASinhNormStats | ConditionalStats:
-    """Load normalization stats from config dictionary.
-
-    Parameters:
-    -----------
-    norm_config: Config dictionary containing normalization stats.
-        For image stats: expects keys `arcsinh` or `linear` with nested stats.
-        For conditional stats: expects keys `cols`, `min`, `max` directly.
-    image: If True, load image normalization stats. If False, load conditional stats.
-    norm_type: Type of image normalization ("linear" or "arcsinh").
-        Only used when image=True.
-
-    Returns:
-    --------
-    LinearNormStats, ASinhNormStats, or ConditionalStats depending on parameters.
-    """
-    if image:
-        # Load image normalization stats
-        if norm_type == "arcsinh":
-            if "arcsinh" not in norm_config:
-                raise ValueError("norm_config must contain 'arcsinh' section")
-            stats_dict = norm_config["arcsinh"]
-            if not all(k in stats_dict for k in ["min", "max", "scale"]):
-                raise ValueError(
-                    "arcsinh normalization must contain 'min', 'max', and 'scale' fields."
-                )
-            return ASinhNormStats(
-                min=torch.tensor(stats_dict["min"], dtype=torch.float32),
-                max=torch.tensor(stats_dict["max"], dtype=torch.float32),
-                scale=torch.tensor(stats_dict["scale"], dtype=torch.float32),
-            )
-        elif norm_type == "linear":
-            if "linear" not in norm_config:
-                raise ValueError("norm_config must contain 'linear' section")
-            stats_dict = norm_config["linear"]
-            if not all(k in stats_dict for k in ["min", "max"]):
-                raise ValueError(
-                    "linear normalization must contain 'min' and 'max' fields."
-                )
-            return LinearNormStats(
-                min=torch.tensor(stats_dict["min"], dtype=torch.float32),
-                max=torch.tensor(stats_dict["max"], dtype=torch.float32),
-            )
-        else:
-            raise ValueError(
-                f"Unknown norm_type: {norm_type}. Must be 'linear' or 'arcsinh'."
-            )
-    else:
-        # Load conditional normalization stats
-        if not all(k in norm_config for k in ["cols", "min", "max"]):
-            raise ValueError(
-                "Conditional normalization must contain 'cols', 'min', and 'max' fields."
-            )
-        return ConditionalStats(
-            cols=norm_config["cols"],
-            min=torch.tensor(norm_config["min"], dtype=torch.float32),
-            max=torch.tensor(norm_config["max"], dtype=torch.float32),
-        )
-
-
 def save_image_norm_stats(
     stats: LinearNormStats | ASinhNormStats,
     save_path: Path | str,
@@ -681,3 +617,70 @@ def get_conditional_norm_fn(
         )
     else:
         return partial(normalize_conditionals, stats=cond_stats), cond_stats
+
+
+
+# Load function 
+
+def load_stats_from_config(
+    norm_config: dict,
+    image: bool = True,
+    norm_type: str = "arcsinh"
+) -> LinearNormStats | ASinhNormStats | ConditionalStats:
+    """Load normalization stats from config dictionary.
+
+    Parameters:
+    -----------
+    norm_config: Config dictionary containing normalization stats.
+        For image stats: expects keys `arcsinh` or `linear` with nested stats.
+        For conditional stats: expects keys `cols`, `min`, `max` directly.
+    image: If True, load image normalization stats. If False, load conditional stats.
+    norm_type: Type of image normalization ("linear" or "arcsinh").
+        Only used when image=True.
+
+    Returns:
+    --------
+    LinearNormStats, ASinhNormStats, or ConditionalStats depending on parameters.
+    """
+    if image:
+        # Load image normalization stats
+        if norm_type == "arcsinh":
+            if "arcsinh" not in norm_config:
+                raise ValueError("norm_config must contain 'arcsinh' section")
+            stats_dict = norm_config["arcsinh"]
+            if not all(k in stats_dict for k in ["min", "max", "scale"]):
+                raise ValueError(
+                    "arcsinh normalization must contain 'min', 'max', and 'scale' fields."
+                )
+            return ASinhNormStats(
+                min=torch.tensor(stats_dict["min"], dtype=torch.float32),
+                max=torch.tensor(stats_dict["max"], dtype=torch.float32),
+                scale=torch.tensor(stats_dict["scale"], dtype=torch.float32),
+            )
+        elif norm_type == "linear":
+            if "linear" not in norm_config:
+                raise ValueError("norm_config must contain 'linear' section")
+            stats_dict = norm_config["linear"]
+            if not all(k in stats_dict for k in ["min", "max"]):
+                raise ValueError(
+                    "linear normalization must contain 'min' and 'max' fields."
+                )
+            return LinearNormStats(
+                min=torch.tensor(stats_dict["min"], dtype=torch.float32),
+                max=torch.tensor(stats_dict["max"], dtype=torch.float32),
+            )
+        else:
+            raise ValueError(
+                f"Unknown norm_type: {norm_type}. Must be 'linear' or 'arcsinh'."
+            )
+    else:
+        # Load conditional normalization stats
+        if not all(k in norm_config for k in ["cols", "min", "max"]):
+            raise ValueError(
+                "Conditional normalization must contain 'cols', 'min', and 'max' fields."
+            )
+        return ConditionalStats(
+            cols=norm_config["cols"],
+            min=torch.tensor(norm_config["min"], dtype=torch.float32),
+            max=torch.tensor(norm_config["max"], dtype=torch.float32),
+        )
