@@ -130,8 +130,9 @@ def load_vae_training_config(
     training_config = config["training"]
     vae_config = training_config["vae"]
 
-    # Automatically append /vae to output directory
-    output_dir = Path(training_config["output_dir"]) / "vae"
+    # Automatically append run_name/vae to output directory
+    run_name = config.get("run_name", "")
+    output_dir = Path(training_config["output_dir"]) / run_name / "vae"
 
     return VAETrainingConfig(
         # VAE-specific
@@ -179,7 +180,8 @@ def load_lcfm_training_config(
     config = load_config(config_path)
     training_config = config["training"]
     lcfm_config = training_config["lcfm"]
-    output_dir = Path(training_config["output_dir"]) / "lcfm"
+    run_name = config.get("run_name", "")
+    output_dir = Path(training_config["output_dir"]) / run_name / "lcfm"
 
     fields = _load_lcfm_base_fields(lcfm_config, output_dir)
     return LCFMTrainingConfig(beta=lcfm_config["beta"], **fields)
@@ -205,8 +207,9 @@ def load_cnf_training_config(
     training_config = config["training"]
     cnf_config = training_config["cnf"]
 
-    # Automatically append /cnf to output directory
-    output_dir = Path(training_config["output_dir"]) / "cnf"
+    # Automatically append run_name/cnf to output directory
+    run_name = config.get("run_name", "")
+    output_dir = Path(training_config["output_dir"]) / run_name / "cnf"
 
     return CNFTrainingConfig(
         # CNF-specific
@@ -235,7 +238,8 @@ def load_dlcfm_training_config(
     config = load_config(config_path)
     training_config = config["training"]
     dlcfm_config = training_config["dlcfm"]
-    output_dir = Path(training_config["output_dir"]) / "dlcfm"
+    run_name = config.get("run_name", "")
+    output_dir = Path(training_config["output_dir"]) / run_name / "dlcfm"
 
     condition_cols = dlcfm_config.get("condition_cols", [])
     fields = _load_lcfm_base_fields(dlcfm_config, output_dir)
