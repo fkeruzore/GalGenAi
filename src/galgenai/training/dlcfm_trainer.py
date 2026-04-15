@@ -82,7 +82,7 @@ class DLCFMTrainer(LCFMTrainer):
         # 4. Total loss
         total_loss = flow_loss + dis_loss
 
-        self.optimizer.zero_grad()
+        self.optimizer.zero_grad(set_to_none=True)
         total_loss.backward()
         self._clip_gradients()
         self.optimizer.step()

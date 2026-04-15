@@ -191,21 +191,12 @@ def align_loss(
     # K >= 2: cross-degree terms only (k != k')
     u_lifted = _polynomial_lift(u, K)  # (N, K)
     mu_lifted = _polynomial_lift(mu, K)  # (N, K)
-    # Full correlation matrix between all lifted features
     corr = _batch_corr_matrix(u_lifted, mu_lifted)  # (K, K)
 
-    # R_1: average diagonal |correlation| for cross-degree pairs
-    # Pairs (k, k') with k != k'
-    total = torch.tensor(0.0, device=u_j.device)
-    n_pairs = 0
-    for k in range(K):
-        for kp in range(K):
-            if k != kp:
-                total = total + (1.0 - corr[k, kp].abs())
-                n_pairs += 1
-
-    r1 = total / max(n_pairs, 1)
-    return r1
+    # Off-diagonal mask for cross-degree pairs (k != k')
+    mask = ~torch.eye(K, dtype=torch.bool, device=u_j.device)
+    off_diag = corr[mask]  # K*(K-1) elements
+    return (1.0 - off_diag.abs()).mean()
 
 
 def decorr_loss(
@@ -247,21 +238,12 @@ def decorr_loss(
     b_lifted = _polynomial_lift(b, K)  # (N, K * m_b)
     corr = _batch_corr_matrix(a_lifted, b_lifted)  # (K*m_a, K*m_b)
 
-    # Sum |corr_ij| for cross-degree blocks only (k != k')
-    total = torch.tensor(0.0, device=a.device)
-    n_pairs = 0
-    for k in range(K):
-        for kp in range(K):
-            if k != kp:
-                block = corr[
-                    k * m_a : (k + 1) * m_a,
-                    kp * m_b : (kp + 1) * m_b,
-                ]
-                total = total + block.abs().sum()
-                n_pairs += 1
-
-    denom = max(n_pairs, 1) * m_a * m_b
-    return total / denom
+    block_mask = ~torch.eye(K, dtype=torch.bool, device=a.device)
+    elem_mask = block_mask.repeat_interleave(
+        m_a, dim=0
+    ).repeat_interleave(m_b, dim=1)
+    cross_corr = corr[elem_mask]  # K*(K-1)*m_a*m_b elements
+    return cross_corr.abs().mean()
 
 
 def disentangled_kl(
@@ -361,29 +343,72 @@ def dlcfm_disentanglement_loss(
     # 1. KL divergence with conditional prior
     kl = disentangled_kl(mu, logvar, aux_vars, n_aux, tau_sq)
 
-    # 2. Explicitness + intra-independence (per guided dimension)
-    align_total = torch.tensor(0.0, device=mu.device)
-    intra_decorr_total = torch.tensor(0.0, device=mu.device)
+    # 2. Explicitness + intra-independence via batched correlation
+    u_lifted = _polynomial_lift(aux_vars, K)
+    mu_lifted = _polynomial_lift(mu_aux, K)
+    full_corr = _batch_corr_matrix(u_lifted, mu_lifted)
 
-    for j in range(n_aux):
-        # Explicitness: guided dim j tracks u_j
-        align_total = align_total + align_loss(
-            aux_vars[:, j], mu_aux[:, j], K=K
+    if K == 1:
+        diag_corr = torch.diag(full_corr)
+        align_total = (1.0 - diag_corr.abs()).sum()
+
+        if n_aux > 1:
+            off_diag = ~torch.eye(
+                n_aux, dtype=torch.bool, device=mu.device
+            )
+            intra_decorr_total = (
+                full_corr[off_diag].abs().mean() * n_aux
+            )
+        else:
+            intra_decorr_total = mu.new_tensor(0.0)
+    else:
+        # K >= 2: extract (K, K) sub-blocks from full_corr
+        degree_off_diag = ~torch.eye(
+            K, dtype=torch.bool, device=mu.device
         )
 
-        # Intra-independence: u_j decorrelated from other guided dims
+        align_total = mu.new_tensor(0.0)
+        for j in range(n_aux):
+            block = full_corr[
+                j * K : (j + 1) * K, j * K : (j + 1) * K
+            ]
+            align_total = align_total + (
+                1.0 - block[degree_off_diag].abs()
+            ).mean()
+
         if n_aux > 1:
-            other_idx = [i for i in range(n_aux) if i != j]
-            mu_aux_other = mu_aux[:, other_idx]  # (N, n_aux - 1)
-            intra_decorr_total = intra_decorr_total + decorr_loss(
-                aux_vars[:, j], mu_aux_other, K=K
-            )
+            # Precompute column ranges and cross-degree block mask
+            col_ranges = [
+                list(range(i * K, (i + 1) * K))
+                for i in range(n_aux)
+            ]
+            n_other = n_aux - 1
+            # Tile (not interleave) to match block structure
+            block_mask = degree_off_diag.repeat(1, n_other)
+
+            intra_decorr_total = mu.new_tensor(0.0)
+            for j in range(n_aux):
+                col_idx = [
+                    c
+                    for i, r in enumerate(col_ranges)
+                    if i != j
+                    for c in r
+                ]
+                row_block = full_corr[
+                    j * K : (j + 1) * K, col_idx
+                ]
+                cross_entries = row_block[block_mask]
+                intra_decorr_total = (
+                    intra_decorr_total + cross_entries.abs().mean()
+                )
+        else:
+            intra_decorr_total = mu.new_tensor(0.0)
 
     # 3. Inter-independence: aux vars decorrelated from residual latents
     if mu_rec.shape[1] > 0:
         inter_decorr = decorr_loss(aux_vars, mu_rec, K=K)
     else:
-        inter_decorr = torch.tensor(0.0, device=mu.device)
+        inter_decorr = mu.new_tensor(0.0)
 
     # Combine
     total_loss = (

@@ -91,7 +91,7 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         )
 
         # Backward pass
-        self.optimizer.zero_grad()
+        self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
         self._clip_gradients()
         self.optimizer.step()
