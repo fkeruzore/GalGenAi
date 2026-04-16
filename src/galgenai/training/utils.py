@@ -362,7 +362,20 @@ def dlcfm_disentanglement_loss(
         else:
             intra_decorr_total = mu.new_tensor(0.0)
     else:
-        # K >= 2: extract (K, K) sub-blocks from full_corr
+        # K >= 2: extract (K, K) sub-blocks from full_corr.
+        # _polynomial_lift emits a degree-first layout
+        # [var_0^1,..,var_{n_aux-1}^1, var_0^2,..,var_{n_aux-1}^2, ..].
+        # Permute rows/cols to variable-first so per-variable
+        # (K, K) sub-blocks are contiguous.
+        perm = (
+            torch.arange(K * n_aux, device=mu.device)
+            .view(K, n_aux)
+            .T.reshape(-1)
+        )
+        full_corr = full_corr.index_select(0, perm).index_select(
+            1, perm
+        )
+
         degree_off_diag = ~torch.eye(
             K, dtype=torch.bool, device=mu.device
         )
