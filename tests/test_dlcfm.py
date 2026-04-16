@@ -196,6 +196,31 @@ def test_combined_loss_lambda_routing(beta, lam1, lam2, n_aux, check):
         assert comp["intra_decorr"] == 0.0
 
 
+def test_combined_loss_k2_aligned_variables():
+    """K>=2 with n_aux>1: perfectly aligned per-variable mapping
+    should give a small align component. Regression test for a
+    layout bug where polynomial_lift emits degree-first columns
+    but the K>=2 branch sliced assuming variable-first layout,
+    which made align measure cross-variable same-degree
+    correlations instead of same-variable cross-degree."""
+    torch.manual_seed(0)
+    n_aux = 3
+    aux = torch.rand(512, n_aux)
+    mu_aux = 2.0 * aux + 0.1
+    mu = torch.cat([mu_aux, torch.randn(512, 4)], dim=1)
+    logvar = torch.zeros_like(mu)
+
+    _, comp = dlcfm_disentanglement_loss(
+        mu, logvar, aux, n_aux=n_aux, K=2, beta=0.0,
+        lambda1=1.0, lambda2=0.0,
+    )
+    # With correct indexing, aligned variables -> align ~ 0.
+    # With the old bug, align ~ n_aux (=3).
+    assert comp["align"] < 0.2, (
+        f"align={comp['align']:.3f} too high; layout bug?"
+    )
+
+
 # ---- extract_dlcfm_batch_data ----
 
 
