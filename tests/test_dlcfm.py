@@ -144,7 +144,9 @@ def test_combined_loss_output_format():
     logvar = torch.randn(64, 16)
     aux = torch.rand(64, 2)
 
-    total, components = dlcfm_disentanglement_loss(mu, logvar, aux, n_aux=2)
+    total, components = dlcfm_disentanglement_loss(
+        mu, logvar, aux, n_aux=2, tau_sq=1.0
+    )
     assert total.dim() == 0
     assert set(components.keys()) == {
         "kl",
@@ -181,10 +183,11 @@ def test_combined_loss_lambda_routing(beta, lam1, lam2, n_aux, check):
         beta=beta,
         lambda1=lam1,
         lambda2=lam2,
+        tau_sq=1.0,
     )
 
     if check == "kl_only":
-        kl = disentangled_kl(mu, logvar, aux, n_aux=n_aux)
+        kl = disentangled_kl(mu, logvar, aux, n_aux=n_aux, tau_sq=1.0)
         assert torch.allclose(total, kl, atol=1e-5)
     elif check == "no_kl":
         reg = (
@@ -211,8 +214,15 @@ def test_combined_loss_k2_aligned_variables():
     logvar = torch.zeros_like(mu)
 
     _, comp = dlcfm_disentanglement_loss(
-        mu, logvar, aux, n_aux=n_aux, K=2, beta=0.0,
-        lambda1=1.0, lambda2=0.0,
+        mu,
+        logvar,
+        aux,
+        n_aux=n_aux,
+        K=2,
+        beta=0.0,
+        lambda1=1.0,
+        lambda2=0.0,
+        tau_sq=1.0,
     )
     # With correct indexing, aligned variables -> align ~ 0.
     # With the old bug, align ~ n_aux (=3).
@@ -265,7 +275,7 @@ def test_dlcfm_config_defaults():
     assert cfg.lambda1 == 8e-2
     assert cfg.lambda2 == 1e-2
     assert cfg.K == 2
-    assert cfg.tau_sq is None
+    assert cfg.tau_sq == 1.0
     assert cfg.n_aux == 6
 
 
