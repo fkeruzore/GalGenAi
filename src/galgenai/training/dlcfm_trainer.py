@@ -3,7 +3,6 @@
 from typing import Any, Dict, Optional
 
 import torch
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from ..models.lcfm import LCFM
@@ -43,27 +42,12 @@ class DLCFMTrainer(LCFMTrainer):
     def _train_step(self, batch: Any) -> Dict[str, float]:
         """Execute single DL-CFM training step."""
         x1, ivar, mask, aux_vars = extract_dlcfm_batch_data(batch, self.device)
-        batch_size = x1.shape[0]
 
         # 1. Encode to get latent features
         f, mu, logvar = self.model.encode(x1)
 
-        # 2. Flow matching loss (replicated from LCFM.compute_loss)
-        x0 = torch.randn_like(x1)
-        t = torch.rand(batch_size, device=self.device)
-        t_broadcast = t[:, None, None, None]
-        x_t = (1 - t_broadcast) * x0 + t_broadcast * x1
-        u_t = x1 - x0
-        v_pred = self.model.velocity_net(x_t, f, t)
-
-        if ivar is not None and mask is not None:
-            squared_error = (v_pred - u_t).pow(2)
-            mask_float = mask.float()
-            weighted_error = squared_error * ivar * mask_float
-            num_valid = mask_float.sum().clamp(min=1.0)
-            flow_loss = weighted_error.sum() / num_valid
-        else:
-            flow_loss = F.mse_loss(v_pred, u_t)
+        # 2. Flow matching loss
+        flow_loss = self.model.compute_flow_loss(x1, f, ivar=ivar, mask=mask)
 
         # 3. DL-CFM disentanglement loss
         cfg = self.dlcfm_config
@@ -85,10 +69,11 @@ class DLCFMTrainer(LCFMTrainer):
         self.optimizer.zero_grad(set_to_none=True)
         total_loss.backward()
         self._clip_gradients()
-        self.optimizer.step()
 
+        # Set LR before stepping so step 0 uses the warmup value.
         current_lr = self._get_lr_with_warmup()
         self._set_lr(current_lr)
+        self.optimizer.step()
 
         if (
             self.scheduler is not None
@@ -130,25 +115,11 @@ class DLCFMTrainer(LCFMTrainer):
             x1, ivar, mask, aux_vars = extract_dlcfm_batch_data(
                 batch, self.device
             )
-            batch_size = x1.shape[0]
 
             f, mu, logvar = self.model.encode(x1)
-
-            x0 = torch.randn_like(x1)
-            t = torch.rand(batch_size, device=self.device)
-            t_broadcast = t[:, None, None, None]
-            x_t = (1 - t_broadcast) * x0 + t_broadcast * x1
-            u_t = x1 - x0
-            v_pred = self.model.velocity_net(x_t, f, t)
-
-            if ivar is not None and mask is not None:
-                squared_error = (v_pred - u_t).pow(2)
-                mask_float = mask.float()
-                weighted_error = squared_error * ivar * mask_float
-                num_valid = mask_float.sum().clamp(min=1.0)
-                flow_loss = weighted_error.sum() / num_valid
-            else:
-                flow_loss = F.mse_loss(v_pred, u_t)
+            flow_loss = self.model.compute_flow_loss(
+                x1, f, ivar=ivar, mask=mask
+            )
 
             dis_loss, components = dlcfm_disentanglement_loss(
                 mu,

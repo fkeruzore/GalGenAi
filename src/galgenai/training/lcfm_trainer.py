@@ -67,10 +67,14 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
             )
 
     def _get_lr_with_warmup(self) -> float:
-        """Get current LR accounting for warmup."""
+        """Get current LR accounting for warmup.
+
+        Uses (global_step + 1) / warmup_steps so step 0 runs at a small
+        nonzero LR and step (warmup_steps - 1) hits the full LR.
+        """
         if self.global_step < self.config.warmup_steps:
             return self.config.learning_rate * (
-                self.global_step / self.config.warmup_steps
+                (self.global_step + 1) / self.config.warmup_steps
             )
         if self.scheduler is not None:
             return self.scheduler.get_last_lr()[0]
@@ -94,11 +98,11 @@ class LCFMTrainer(BaseTrainer[LCFMTrainingConfig]):
         self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
         self._clip_gradients()
-        self.optimizer.step()
 
-        # Update LR with warmup handling
+        # Set LR before stepping so step 0 uses the warmup value.
         current_lr = self._get_lr_with_warmup()
         self._set_lr(current_lr)
+        self.optimizer.step()
 
         if (
             self.scheduler is not None

@@ -542,6 +542,43 @@ class LCFM(nn.Module):
 
         return f, mu, logvar
 
+    def compute_flow_loss(
+        self,
+        x1: torch.Tensor,
+        f: torch.Tensor,
+        ivar: Optional[torch.Tensor] = None,
+        mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Straight-line flow matching loss given encoder features f.
+
+        Args:
+            x1: (batch, C, H, W) real images.
+            f: (batch, latent_dim) encoder features used to condition
+                the velocity net.
+            ivar: Optional (batch, C, H, W) inverse-variance weights.
+            mask: Optional (batch, C, H, W) validity mask. If both
+                ivar and mask are provided, uses masked weighted MSE;
+                otherwise plain MSE.
+
+        Returns:
+            Scalar flow matching loss.
+        """
+        batch_size = x1.shape[0]
+        x0 = torch.randn_like(x1)
+        t = torch.rand(batch_size, device=x1.device)
+        t_broadcast = t[:, None, None, None]
+        x_t = (1 - t_broadcast) * x0 + t_broadcast * x1
+        u_t = x1 - x0
+        v_pred = self.velocity_net(x_t, f, t)
+
+        if ivar is not None and mask is not None:
+            squared_error = (v_pred - u_t).pow(2)
+            mask_float = mask.float()
+            weighted_error = squared_error * ivar * mask_float
+            num_valid = mask_float.sum().clamp(min=1.0)
+            return weighted_error.sum() / num_valid
+        return F.mse_loss(v_pred, u_t)
+
     def compute_loss(
         self,
         x1: torch.Tensor,
@@ -561,46 +598,19 @@ class LCFM(nn.Module):
             loss: scalar loss value
             (optional) dict with 'flow_loss' and 'kl_loss'
         """
-        batch_size = x1.shape[0]
-        device = x1.device
-
         # 1. Encode to get latent features
         f, mu, logvar = self.encode(x1)
 
-        # 2. Sample noise (source distribution)
-        x0 = torch.randn_like(x1)
+        # 2. Flow matching loss
+        flow_loss = self.compute_flow_loss(x1, f, ivar=ivar, mask=mask)
 
-        # 3. Sample time uniformly
-        t = torch.rand(batch_size, device=device)
-
-        # 4. Interpolate: x_t = (1-t)*x_0 + t*x_1
-        # Reshape t for broadcasting: (batch,) -> (batch, 1, 1, 1)
-        t_broadcast = t[:, None, None, None]
-        x_t = (1 - t_broadcast) * x0 + t_broadcast * x1
-
-        # 5. Target velocity (constant along straight path)
-        u_t = x1 - x0
-
-        # 6. Predict velocity
-        v_pred = self.velocity_net(x_t, f, t)
-
-        # 7. Flow matching loss (weighted MSE when ivar/mask provided)
-        if ivar is not None and mask is not None:
-            squared_error = (v_pred - u_t).pow(2)
-            mask_float = mask.float()
-            weighted_error = squared_error * ivar * mask_float
-            num_valid = mask_float.sum().clamp(min=1.0)
-            flow_loss = weighted_error.sum() / num_valid
-        else:
-            flow_loss = F.mse_loss(v_pred, u_t)
-
-        # 8. KL divergence loss: KL(N(μ, σ²) || N(0, I))
+        # 3. KL divergence loss: KL(N(μ, σ²) || N(0, I))
         # = 0.5 * sum(μ² + σ² - log(σ²) - 1)
         kl_loss = -0.5 * torch.mean(
             torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1)
         )
 
-        # 9. Total loss
+        # 4. Total loss
         loss = flow_loss + self.beta * kl_loss
 
         if return_components:
