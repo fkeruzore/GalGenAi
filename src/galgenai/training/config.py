@@ -100,7 +100,7 @@ class DLCFMTrainingConfig(LCFMTrainingConfig):
     lambda1: float = 8e-2
     lambda2: float = 1e-2
     K: int = 2
-    tau_sq: Optional[float] = None
+    tau_sq: float = 1.0
     n_aux: int = 6
     condition_cols: List[str] = field(default_factory=list)
 
@@ -249,7 +249,7 @@ def load_dlcfm_training_config(
         lambda1=dlcfm_config["lambda1"],
         lambda2=dlcfm_config["lambda2"],
         K=dlcfm_config["K"],
-        tau_sq=dlcfm_config.get("tau_sq"),
+        tau_sq=dlcfm_config.get("tau_sq", 1.0),
         n_aux=len(condition_cols),
         condition_cols=condition_cols,
         **fields,

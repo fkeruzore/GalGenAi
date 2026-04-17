@@ -239,9 +239,9 @@ def decorr_loss(
     corr = _batch_corr_matrix(a_lifted, b_lifted)  # (K*m_a, K*m_b)
 
     block_mask = ~torch.eye(K, dtype=torch.bool, device=a.device)
-    elem_mask = block_mask.repeat_interleave(
-        m_a, dim=0
-    ).repeat_interleave(m_b, dim=1)
+    elem_mask = block_mask.repeat_interleave(m_a, dim=0).repeat_interleave(
+        m_b, dim=1
+    )
     cross_corr = corr[elem_mask]  # K*(K-1)*m_a*m_b elements
     return cross_corr.abs().mean()
 
@@ -251,7 +251,7 @@ def disentangled_kl(
     logvar: torch.Tensor,
     aux_vars: torch.Tensor,
     n_aux: int,
-    tau_sq: Optional[float] = None,
+    tau_sq: float,
 ) -> torch.Tensor:
     """KL divergence against auxiliary-informed prior (Eq. 1 & 6).
 
@@ -264,14 +264,13 @@ def disentangled_kl(
         logvar: (N, d_Z) encoder log-variance.
         aux_vars: (N, d) auxiliary variables normalized to [0,1].
         n_aux: Number of auxiliary dimensions d.
-        tau_sq: Variance for guided dims (default: 1/N).
+        tau_sq: Variance for guided prior dims. Must be
+            batch-independent.
 
     Returns:
         Scalar KL divergence averaged over the batch.
     """
-    batch_size, d_z = mu.shape
-    if tau_sq is None:
-        tau_sq = 1.0 / batch_size
+    _, d_z = mu.shape
 
     # Build prior mean: [aux_vars, zeros]
     mu_0 = torch.zeros_like(mu)
@@ -309,7 +308,7 @@ def dlcfm_disentanglement_loss(
     lambda1: float = 8e-2,
     lambda2: float = 1e-2,
     K: int = 2,
-    tau_sq: Optional[float] = None,
+    tau_sq: float = 1.0,
 ) -> Tuple[torch.Tensor, dict]:
     """DL-CFM disentanglement loss terms (Eq. 2, excluding flow loss).
 
@@ -331,7 +330,8 @@ def dlcfm_disentanglement_loss(
         lambda1: Weight for explicitness + intra-independence.
         lambda2: Weight for inter-independence.
         K: Polynomial degree for correlation penalties.
-        tau_sq: Variance for guided prior dims (default: 1/N).
+        tau_sq: Variance for guided prior dims. Batch-independent;
+            defaults to 1.0 (standard normal on guided dims).
 
     Returns:
         total_loss: Scalar disentanglement loss.
@@ -353,12 +353,8 @@ def dlcfm_disentanglement_loss(
         align_total = (1.0 - diag_corr.abs()).sum()
 
         if n_aux > 1:
-            off_diag = ~torch.eye(
-                n_aux, dtype=torch.bool, device=mu.device
-            )
-            intra_decorr_total = (
-                full_corr[off_diag].abs().mean() * n_aux
-            )
+            off_diag = ~torch.eye(n_aux, dtype=torch.bool, device=mu.device)
+            intra_decorr_total = full_corr[off_diag].abs().mean() * n_aux
         else:
             intra_decorr_total = mu.new_tensor(0.0)
     else:
@@ -372,28 +368,21 @@ def dlcfm_disentanglement_loss(
             .view(K, n_aux)
             .T.reshape(-1)
         )
-        full_corr = full_corr.index_select(0, perm).index_select(
-            1, perm
-        )
+        full_corr = full_corr.index_select(0, perm).index_select(1, perm)
 
-        degree_off_diag = ~torch.eye(
-            K, dtype=torch.bool, device=mu.device
-        )
+        degree_off_diag = ~torch.eye(K, dtype=torch.bool, device=mu.device)
 
         align_total = mu.new_tensor(0.0)
         for j in range(n_aux):
-            block = full_corr[
-                j * K : (j + 1) * K, j * K : (j + 1) * K
-            ]
-            align_total = align_total + (
-                1.0 - block[degree_off_diag].abs()
-            ).mean()
+            block = full_corr[j * K : (j + 1) * K, j * K : (j + 1) * K]
+            align_total = (
+                align_total + (1.0 - block[degree_off_diag].abs()).mean()
+            )
 
         if n_aux > 1:
             # Precompute column ranges and cross-degree block mask
             col_ranges = [
-                list(range(i * K, (i + 1) * K))
-                for i in range(n_aux)
+                list(range(i * K, (i + 1) * K)) for i in range(n_aux)
             ]
             n_other = n_aux - 1
             # Tile (not interleave) to match block structure
@@ -402,14 +391,9 @@ def dlcfm_disentanglement_loss(
             intra_decorr_total = mu.new_tensor(0.0)
             for j in range(n_aux):
                 col_idx = [
-                    c
-                    for i, r in enumerate(col_ranges)
-                    if i != j
-                    for c in r
+                    c for i, r in enumerate(col_ranges) if i != j for c in r
                 ]
-                row_block = full_corr[
-                    j * K : (j + 1) * K, col_idx
-                ]
+                row_block = full_corr[j * K : (j + 1) * K, col_idx]
                 cross_entries = row_block[block_mask]
                 intra_decorr_total = (
                     intra_decorr_total + cross_entries.abs().mean()
